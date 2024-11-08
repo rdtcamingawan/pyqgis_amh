@@ -1,4 +1,6 @@
 # Import modules
+import matplotlib
+matplotlib.use('Agg')
 from matplotlib import pyplot as plt
 import os
 import re
@@ -21,6 +23,7 @@ from qgis.core import QgsExpression
 from qgis.core import QgsVectorLayer
 from qgis.core import QgsProject
 from qgis.core import QgsWkbTypes
+from qgis.core import QgsAggregateCalculator
 import processing
 
 # Set global font to Calibri and font size to 9pt
@@ -78,7 +81,7 @@ class transectlines(QgsProcessingAlgorithm):
         cleaned_data1 = [re.sub(r'SB - | sb_|_sb|^sb_|^SB_', '', item) for item in folders]
         cleaned_data2 = [re.sub(r'sb_odette', 'Ty. Odette', item) for item in cleaned_data1]
         img_name = [re.sub(r'Post -odette', 'Ty. Odette_post', item) for item in cleaned_data2]
-        img_name1 = [name+'1' for name in img_name]
+        img_name1 = ['elev'+name+'1' for name in img_name]
         
         # Ensure the save folder exists
         os.makedirs(parameters['save_folder'], exist_ok=True)
@@ -125,7 +128,7 @@ class transectlines(QgsProcessingAlgorithm):
                     'RASTERCOPY': tlayer,
                     'COLUMN_PREFIX':'terrain',
                     'OUTPUT':'TEMPORARY_OUTPUT'}
-                outputs['sampled'] = processing.run("native:rastersampling", alg_params, context=context, feedback=model_feedback
+                outputs['sampled'] = processing.run("native:rastersampling", alg_params, context=context, feedback=model_feedback)
                 
                 # store the values of distance and terrain in a list
                 layer = outputs['sampled']['OUTPUT']
@@ -143,43 +146,43 @@ class transectlines(QgsProcessingAlgorithm):
                         'COLUMN_PREFIX': column_name,
                         'OUTPUT':'TEMPORARY_OUTPUT'}
                     outputs['sampled'] = processing.run("native:rastersampling", alg_params, context=context, feedback=model_feedback)
-                
+
+                # get the names of each field in the output
+                layer = outputs['sampled']['OUTPUT'].dataProvider()
+                names = [f.name() for f in layer.fields()]
+
                 # ----- This section plots the values -----
                 
                 # save the output in a variable 
                 layer = outputs['sampled']['OUTPUT']
+
 
                 # initialize a color list
                 color_list = ['#a6cee3', '#1f78b4', '#b2df8a', '#33a02c', '#fb9a99','#e31a1c', '#fdbf6f', '#ff7f00', '#cab2d6', '#6a3d9a', '#ffff99', '#b15928', '#8dd3c7','#762a83' ]
       
                 # initiliaze the figure plot
                 fig = plt.subplots(figsize = (5.65,2.2))
-                            
+
                 # plot the terrain elevation
                 plt.plot(distance, terrain, label = 'Terrain', color='black')
-                
-                # iterate over each field name corresponding to img name
-                for img in nam
 
-                # plot each sample result rasters
-                i=0
-                for field in layer.fields():
-                    if field.name() in img_name1:
-                        field_values = [f[field.name()] for f in features]
-                        plt.plot(distance, np.array(field_values, dtype=float), label=img_name[i], color=color_list[i % len(color_list)])
-                        i+=1
-                              
+                # iterate over each field name corresponding to img name
+                # then plot for each result raster
+                for img in names:
+                    if img in img_name1:
+                        i=img_name.index(img)
+                        wse_value = layer.aggregate(QgsAggregateCalculator.ArrayAggregate, img)[0]
+                        plt.plot(distance, wse_value, label= img_name[i], color=color_list[i])
+                    else:
+                        model_feedback.reportError(f"Field {img} not found in layer fields.")
+                             
                 plt.xlabel('Station (m)')
                 plt.ylabel('WSE (m)')
                 plt.legend()
                 plt.tight_layout()
                 
                 # Save the figure
-                #set the savepath of the plot
-                # os.makedirs(parameters['save_folder'], exist_ok=True)
-                file_list = []
                 file_name = feature['name'] + '.png'
-                file_list.append(file_name)
                 savepath = os.path.join(save_folder, file_name)
                 plt.savefig(savepath, dpi=300)
                 plt.close()
