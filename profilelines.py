@@ -32,21 +32,13 @@ plt.rcParams['font.size'] = 9
 
 class transectlines(QgsProcessingAlgorithm):
 
-    def initAlgorithm(self, config=None):
-        # self.addParameter(QgsProcessingParameterRasterLayer('dem', 'DEM', defaultValue=None))
-        # self.addParameter(QgsProcessingParameterNumber('minimum_area', 'Minimum Area', type=QgsProcessingParameterNumber.Double, minValue=0, maxValue=10000, defaultValue=50000))
-        # self.addParameter(QgsProcessingParameterVectorDestination('Streams', 'Streams', optional=True, type=QgsProcessing.TypeVectorAnyGeometry, createByDefault=True, defaultValue=None))
-        # self.addParameter(QgsProcessingParameterVectorDestination('Basin', 'Basin', type=QgsProcessing.TypeVectorAnyGeometry, createByDefault=True, defaultValue=None))
-        # self.addParameter(QgsProcessingParameterFeatureSink('Subbasins', 'Subbasins', type=QgsProcessing.TypeVectorAnyGeometry, createByDefault=True, defaultValue=None))
-        
-        # Add the cross section layer
+    def initAlgorithm(self, config=None):      
+        # Add the parameters
         self.addParameter(QgsProcessingParameterVectorLayer('transect', 'River Centerline', types=[QgsProcessing.TypeVectorLine], defaultValue=None))
         self.addParameter(QgsProcessingParameterRasterLayer('terrain', 'Terrain Layer', defaultValue=None))
-        # self.addParameter(QgsProcessingParameterRasterLayer('depth_res15', '15 Result Raster', defaultValue=None))
         self.addParameter(QgsProcessingParameterFile('ras_folder','RAS Folder Destination', behavior=QgsProcessingParameterFile.Folder))
         self.addParameter(QgsProcessingParameterFile('save_folder','Save Folder Destination', behavior=QgsProcessingParameterFile.Folder))
-
-
+        
     def processAlgorithm(self, parameters, context, model_feedback):
         # initialize results dictionary
         results = {}
