@@ -81,6 +81,7 @@ class transectlines(QgsProcessingAlgorithm):
         cleaned_data1 = [re.sub(r'SB - | sb_|_sb|^sb_|^SB_', '', item) for item in folders]
         cleaned_data2 = [re.sub(r'sb_odette', 'Ty. Odette', item) for item in cleaned_data1]
         img_name = [re.sub(r'Post -odette', 'Ty. Odette_post', item) for item in cleaned_data2]
+        label_name = [re.sub(r'_post\b', '-Post', item) for item in img_name]
         img_name1 = ['elev'+name+'1' for name in img_name]
         
         # Ensure the save folder exists
@@ -133,7 +134,10 @@ class transectlines(QgsProcessingAlgorithm):
                 # store the values of distance and terrain in a list
                 layer = outputs['sampled']['OUTPUT']
                 distance = layer.aggregate(QgsAggregateCalculator.ArrayAggregate, 'distance')[0]
+                # model_feedback.pushInfo(f"Distance data: {distance}")
+                
                 terrain = layer.aggregate(QgsAggregateCalculator.ArrayAggregate, 'terrain1')[0]
+                # model_feedback.pushInfo(f"Terrain data: {terrain}")
                 
                 # iterate over each WSE raster maps
                 for i, wse in enumerate(result_layer):
@@ -149,7 +153,10 @@ class transectlines(QgsProcessingAlgorithm):
 
                 # get the names of each field in the output
                 layer = outputs['sampled']['OUTPUT'].dataProvider()
-                names = [f.name() for f in layer.fields()]
+                field_names = [f.name() for f in layer.fields()]
+                # model_feedback.pushInfo(f"Field Names data: {field_names}")
+                # model_feedback.pushInfo(f"img_name1 data: {img_name1}")
+                # model_feedback.pushInfo(f"img_name data: {img_name}")
 
                 # ----- This section plots the values -----
                 
@@ -161,31 +168,38 @@ class transectlines(QgsProcessingAlgorithm):
                 color_list = ['#a6cee3', '#1f78b4', '#b2df8a', '#33a02c', '#fb9a99','#e31a1c', '#fdbf6f', '#ff7f00', '#cab2d6', '#6a3d9a', '#ffff99', '#b15928', '#8dd3c7','#762a83' ]
       
                 # initiliaze the figure plot
-                fig = plt.subplots(figsize = (5.65,2.2))
+                fig, ax= plt.subplots(figsize = (5.65,3))
 
                 # plot the terrain elevation
-                plt.plot(distance, terrain, label = 'Terrain', color='black')
+                ax.plot(distance, terrain, label = 'Terrain', color='black', linewidth = 1)
 
                 # iterate over each field name corresponding to img name
                 # then plot for each result raster
-                for img in names:
+                for img in field_names:
                     if img in img_name1:
-                        i=img_name.index(img)
+                        i=img_name1.index(img)
                         wse_value = layer.aggregate(QgsAggregateCalculator.ArrayAggregate, img)[0]
-                        plt.plot(distance, wse_value, label= img_name[i], color=color_list[i])
+                        # model_feedback.pushInfo(f"WSE value for {img}: {layer.aggregate(QgsAggregateCalculator.ArrayAggregate, img)[0]}")
+                        ax.plot(distance, wse_value, label= label_name[i], color=color_list[i], linewidth = 0.5)
                     else:
-                        model_feedback.reportError(f"Field {img} not found in layer fields.")
+                        model_feedback.reportError(f"Field {img} not found in layer fields. Items of img_name1 {feature['name']}.")
+                        
                              
-                plt.xlabel('Station (m)')
-                plt.ylabel('WSE (m)')
-                plt.legend()
-                plt.tight_layout()
+                ax.xlabel('Station (m)')
+                ax.ylabel('WSE (m)')
+                ax.legend(
+                    loc = 'center left',
+                    bbox_to_anchor = (1,0.5),
+                    fontsize = 7
+                )
+            
+                ax.tight_layout()
                 
                 # Save the figure
                 file_name = feature['name'] + '.png'
                 savepath = os.path.join(save_folder, file_name)
-                plt.savefig(savepath, dpi=300)
-                plt.close()
+                ax.savefig(savepath, dpi=300)
+                ax.close()
                 
                 # Provide feedback after saving the plot
                 model_feedback.pushInfo(f"Saved plot for feature '{feature['name']}' at {savepath}")
