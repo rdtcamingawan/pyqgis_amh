@@ -1,10 +1,3 @@
-"""
-Model exported as python.
-Name : catchment_delineation
-Group : 
-With QGIS : 33803
-"""
-
 from qgis.core import QgsProcessing
 from qgis.core import QgsProcessingAlgorithm
 from qgis.core import QgsProcessingMultiStepFeedback
