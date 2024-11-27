@@ -29,25 +29,6 @@ class Catchment_delineation(QgsProcessingAlgorithm):
         results = {}
         outputs = {}
 
-        # fill sinks
-        alg_params = {
-            '-f': False,
-            'GRASS_RASTER_FORMAT_META': None,
-            'GRASS_RASTER_FORMAT_OPT': None,
-            'GRASS_REGION_CELLSIZE_PARAMETER': 0,
-            'GRASS_REGION_PARAMETER': None,
-            'format': 0,  # grass
-            'input': parameters['dem'],
-            'areas': QgsProcessing.TEMPORARY_OUTPUT,
-            'direction': QgsProcessing.TEMPORARY_OUTPUT,
-            'output': QgsProcessing.TEMPORARY_OUTPUT
-        }
-        outputs['FillSinks'] = processing.run('grass:r.fill.dir', alg_params, context=context, feedback=feedback, is_child_algorithm=True)
-
-        feedback.setCurrentStep(1)
-        if feedback.isCanceled():
-            return {}
-
         # reproject_dem
         alg_params = {
             'DATA_TYPE': 0,  # Use Input Layer Data Type
@@ -65,6 +46,25 @@ class Catchment_delineation(QgsProcessingAlgorithm):
             'OUTPUT': QgsProcessing.TEMPORARY_OUTPUT
         }
         outputs['Reproject_dem'] = processing.run('gdal:warpreproject', alg_params, context=context, feedback=feedback, is_child_algorithm=True)
+
+        feedback.setCurrentStep(1)
+        if feedback.isCanceled():
+            return {}
+        
+        # fill sinks
+        alg_params = {
+            '-f': False,
+            'GRASS_RASTER_FORMAT_META': None,
+            'GRASS_RASTER_FORMAT_OPT': None,
+            'GRASS_REGION_CELLSIZE_PARAMETER': 0,
+            'GRASS_REGION_PARAMETER': None,
+            'format': 0,  # grass
+            'input': outputs['Reproject_dem']['OUTPUT'],
+            'areas': QgsProcessing.TEMPORARY_OUTPUT,
+            'direction': QgsProcessing.TEMPORARY_OUTPUT,
+            'output': QgsProcessing.TEMPORARY_OUTPUT
+        }
+        outputs['FillSinks'] = processing.run('grass:r.fill.dir', alg_params, context=context, feedback=feedback, is_child_algorithm=True)
 
         feedback.setCurrentStep(2)
         if feedback.isCanceled():
@@ -124,20 +124,6 @@ class Catchment_delineation(QgsProcessingAlgorithm):
         if feedback.isCanceled():
             return {}
 
-        # Reproject Outfall
-        alg_params = {
-            'CONVERT_CURVED_GEOMETRIES': False,
-            'INPUT': parameters['outfall'],
-            'OPERATION': None,
-            'TARGET_CRS': parameters['crs'],
-            'OUTPUT': QgsProcessing.TEMPORARY_OUTPUT
-        }
-        outputs['ReprojectOutfall'] = processing.run('native:reprojectlayer', alg_params, context=context, feedback=feedback, is_child_algorithm=True)
-
-        feedback.setCurrentStep(5)
-        if feedback.isCanceled():
-            return {}
-
         # thin_streams
         alg_params = {
             'GRASS_RASTER_FORMAT_META': None,
@@ -178,6 +164,20 @@ class Catchment_delineation(QgsProcessingAlgorithm):
         if feedback.isCanceled():
             return {}
 
+        # Reproject Outfall
+        alg_params = {
+            'CONVERT_CURVED_GEOMETRIES': False,
+            'INPUT': parameters['outfall'],
+            'OPERATION': None,
+            'TARGET_CRS': parameters['crs'],
+            'OUTPUT': QgsProcessing.TEMPORARY_OUTPUT
+        }
+        outputs['ReprojectOutfall'] = processing.run('native:reprojectlayer', alg_params, context=context, feedback=feedback, is_child_algorithm=True)
+
+        feedback.setCurrentStep(5)
+        if feedback.isCanceled():
+            return {}
+        
         # snapped
         alg_params = {
             'BEHAVIOR': 1,  # Prefer closest point, insert extra vertices where required
@@ -192,45 +192,9 @@ class Catchment_delineation(QgsProcessingAlgorithm):
         if feedback.isCanceled():
             return {}
 
-        # save snapped geom w coordinates
-        alg_params = {
-            'CALC_METHOD': 0,  # Layer CRS
-            'INPUT': outputs['Snapped']['OUTPUT'],
-            'OUTPUT': QgsProcessing.TEMPORARY_OUTPUT
-        }
-        outputs['SaveSnappedGeomWCoordinates'] = processing.run('qgis:exportaddgeometrycolumns', alg_params, context=context, feedback=feedback, is_child_algorithm=True)
-
-        feedback.setCurrentStep(9)
-        if feedback.isCanceled():
-            return {}
-
-        # y_coor
-        alg_params = {
-            'FIELD_LENGTH': 50,
-            'FIELD_NAME': 'y_coor',
-            'FIELD_PRECISION': 5,
-            'FIELD_TYPE': 0,  # Decimal (double)
-            'FORMULA': 'y(@geometry)\n',
-            'INPUT': outputs['SaveSnappedGeomWCoordinates']['OUTPUT'],
-            'OUTPUT': QgsProcessing.TEMPORARY_OUTPUT
-        }
-        outputs['Y_coor'] = processing.run('native:fieldcalculator', alg_params, context=context, feedback=feedback, is_child_algorithm=True)
-
-        feedback.setCurrentStep(10)
-        if feedback.isCanceled():
-            return {}
-
-        # x_coor
-        alg_params = {
-            'FIELD_LENGTH': 50,
-            'FIELD_NAME': 'x_coor',
-            'FIELD_PRECISION': 5,
-            'FIELD_TYPE': 0,  # Decimal (double)
-            'FORMULA': 'x(@geometry)\n',
-            'INPUT': outputs['SaveSnappedGeomWCoordinates']['OUTPUT'],
-            'OUTPUT': QgsProcessing.TEMPORARY_OUTPUT
-        }
-        outputs['X_coor'] = processing.run('native:fieldcalculator', alg_params, context=context, feedback=feedback, is_child_algorithm=True)
+        # get the x,y coordinates of the snapped outfall
+        pt = outputs['Snapped']['OUTPUT'].getGeometry(1).asPoint()
+        coor = (pt.x(), pt.y())
 
         feedback.setCurrentStep(11)
         if feedback.isCanceled():
@@ -242,7 +206,7 @@ class Catchment_delineation(QgsProcessingAlgorithm):
             'GRASS_RASTER_FORMAT_OPT': None,
             'GRASS_REGION_CELLSIZE_PARAMETER': 0,
             'GRASS_REGION_PARAMETER': None,
-            'coordinates': QgsExpression('aggregate(\n\tlayer:=  @x_coor_OUTPUT ,\n\taggregate:= \'max\',\n\texpression := "x_coor"\n\n)\n|| \',\' ||\naggregate(\n\tlayer:=  @y_coor_OUTPUT,\n\taggregate:= \'max\',\n\texpression := "y_coor"\n)').evaluate(),
+            'coordinates': coor,
             'input': outputs['Streams']['drainage'],
             'output': QgsProcessing.TEMPORARY_OUTPUT
         }
