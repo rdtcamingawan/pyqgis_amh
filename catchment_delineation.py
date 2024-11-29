@@ -8,6 +8,7 @@ from qgis.core import QgsProcessingParameterVectorLayer
 from qgis.core import QgsProcessingParameterVectorDestination
 from qgis.core import QgsProcessingParameterFeatureSink
 from qgis.core import QgsExpression
+from qgis.core import QgsProcessingUtils
 import processing
 
 
@@ -25,7 +26,7 @@ class Catchment_delineation(QgsProcessingAlgorithm):
     def processAlgorithm(self, parameters, context, model_feedback):
         # Use a multi-step feedback, so that individual child algorithm progress reports are adjusted for the
         # overall progress through the model
-        feedback = QgsProcessingMultiStepFeedback(16, model_feedback)
+        feedback = QgsProcessingMultiStepFeedback(17, model_feedback)
         results = {}
         outputs = {}
 
@@ -193,8 +194,8 @@ class Catchment_delineation(QgsProcessingAlgorithm):
             return {}
 
         # get the x,y coordinates of the snapped outfall
-        pt = outputs['Snapped']['OUTPUT'].getGeometry(1).asPoint()
-        coor = (pt.x(), pt.y())
+        pt_layer = QgsProcessingUtils.mapLayerFromString(outputs['Snapped']['OUTPUT'], context)
+        pt = pt_layer.getGeometry(1).asPoint()
 
         feedback.setCurrentStep(11)
         if feedback.isCanceled():
@@ -206,7 +207,7 @@ class Catchment_delineation(QgsProcessingAlgorithm):
             'GRASS_RASTER_FORMAT_OPT': None,
             'GRASS_REGION_CELLSIZE_PARAMETER': 0,
             'GRASS_REGION_PARAMETER': None,
-            'coordinates': coor,
+            'coordinates': f'{pt.x()}, {pt.y()}',
             'input': outputs['Streams']['drainage'],
             'output': QgsProcessing.TEMPORARY_OUTPUT
         }
@@ -235,22 +236,43 @@ class Catchment_delineation(QgsProcessingAlgorithm):
             'output': parameters['Basin']
         }
         outputs['Basin_vectorized'] = processing.run('grass:r.to.vect', alg_params, context=context, feedback=feedback, is_child_algorithm=True)
-        results['Basin'] = outputs['Basin_vectorized']['output']
-
+        
         feedback.setCurrentStep(13)
+        if feedback.isCanceled():
+            return {}
+            
+        # fix geometries
+        # fix subbasins geometry
+        alg_params = {'INPUT': outputs['Subbasins']['output'],
+            'METHOD':1,
+            'OUTPUT':'TEMPORARY_OUTPUT'}
+        outputs['fixed_subbasins'] = processing.run("native:fixgeometries", alg_params, context = context, feedback=feedback)
+        
+        feedback.setCurrentStep(14)
+        if feedback.isCanceled():
+            return {}
+        
+        # fix basin geometry
+        alg_params = {'INPUT': outputs['Basin_vectorized']['output'],
+            'METHOD':1,
+            'OUTPUT':'TEMPORARY_OUTPUT'}
+        outputs['fixed_basins'] = processing.run("native:fixgeometries", alg_params, context = context, feedback=feedback)
+        results['Basin'] = outputs['fixed_basins']['OUTPUT']
+        
+        feedback.setCurrentStep(15)
         if feedback.isCanceled():
             return {}
 
         # Clip
         alg_params = {
-            'INPUT': outputs['Subbasins']['output'],
-            'OVERLAY': outputs['Basin_vectorized']['output'],
+            'INPUT': outputs['fixed_subbasins']['OUTPUT'],
+            'OVERLAY': outputs['fixed_basins']['OUTPUT'],
             'OUTPUT': parameters['Subbasins']
         }
         outputs['Clip'] = processing.run('native:clip', alg_params, context=context, feedback=feedback, is_child_algorithm=True)
         results['Subbasins'] = outputs['Clip']['OUTPUT']
 
-        feedback.setCurrentStep(14)
+        feedback.setCurrentStep(16)
         if feedback.isCanceled():
             return {}
 
@@ -262,7 +284,7 @@ class Catchment_delineation(QgsProcessingAlgorithm):
             'EXTRA': None,
             'INPUT': parameters['dem'],
             'KEEP_RESOLUTION': False,
-            'MASK': outputs['Basin_vectorized']['output'],
+            'MASK': outputs['fixed_basins']['OUTPUT'],
             'MULTITHREADING': False,
             'NODATA': None,
             'OPTIONS': None,
@@ -276,7 +298,7 @@ class Catchment_delineation(QgsProcessingAlgorithm):
         }
         outputs['Clip_dem'] = processing.run('gdal:cliprasterbymasklayer', alg_params, context=context, feedback=feedback, is_child_algorithm=True)
 
-        feedback.setCurrentStep(15)
+        feedback.setCurrentStep(17)
         if feedback.isCanceled():
             return {}
 
