@@ -11,6 +11,9 @@ from qgis.core import QgsProcessingParameterFeatureSink
 from qgis.core import QgsExpression
 from qgis.core import QgsProcessingUtils
 from qgis.core import QgsVectorLayer
+from qgis.core import QgsRasterLayer
+from qgis.core import QgsWkbTypes
+from qgis.core import QgsFeature
 import processing
 import os
 import glob
@@ -32,7 +35,7 @@ class wbt_catchment(QgsProcessingAlgorithm):
     def processAlgorithm(self, parameters, context, model_feedback):
         # Use a multi-step feedback, so that individual child algorithm progress reports are adjusted for the
         # overall progress through the model
-        feedback = QgsProcessingMultiStepFeedback(27, model_feedback)
+        feedback = QgsProcessingMultiStepFeedback(31, model_feedback)
         results = {}
         outputs = {}
         wbt_file = parameters['temp_folder']
@@ -546,11 +549,14 @@ class wbt_catchment(QgsProcessingAlgorithm):
 
         # This part saves the attributes of the outputs['scs'] layer to a pandas DataFrame
         # Saving this to a Pandas DataFrame will allow the code to exit of PyQgis and do Pandas functions instead
+        feedback.setCurrentStep(28)
+        if feedback.isCanceled():
+            return {}
         
         # Create a Vector Layer for outputs['scs'] 
-        scs_vector = QgsVectorLayer(outputs['scs'], 'scs_vector', 'ogr')
+        scs_vector = outputs['scs']
         scs_fields = [f.name() for f in scs_vector.fields()] # Pandas column header
-        scs_attrib = [f.attributes for f in scs.getFeatures()] # Pandas data
+        scs_attrib = [f.attributes() for f in scs_vector.getFeatures()] # Pandas data
 
         # Save all scs_vector attributes to a Pandas DataFrame
         scs_df = pd.DataFrame(scs_attrib, columns=scs_fields, index=None)
@@ -573,14 +579,20 @@ class wbt_catchment(QgsProcessingAlgorithm):
         # Initialize basin_summary list for saving to csv later
         basin_summary = []
 
+        feedback.setCurrentStep(29)
+        if feedback.isCanceled():
+            return {}
         # Create geometry for WhiteBoxTools
-        wbt_subbasin = QgsVectorLayer(outputs['wbt_vector_subbasins']['output'], "wbt_subbasin", 'ogr)
+        wbt_subbasin = QgsVectorLayer(outputs['wbt_vector_subbasins']['output'], "wbt_subbasin", 'ogr')
         wbt_dem = QgsRasterLayer(outputs['wbt_watershed']['output'], 'wbt_dem')
         wbt_filled_dem = QgsRasterLayer(outputs['filledWangLiu']['output'], 'wbt_filled_dem')
         
         # Get geometry type of wbt_subbasin and display as a string
         geometry_type_str = QgsWkbTypes.displayString(wbt_subbasin.wkbType())
         
+        feedback.setCurrentStep(30)
+        if feedback.isCanceled():
+            return {}
         # create a vector geometry for each feature in wbt_subbasin layer
         for fet in wbt_subbasin.getFeatures(): 
             # create a temporary vector layer
@@ -648,11 +660,15 @@ class wbt_catchment(QgsProcessingAlgorithm):
             subbasin_list = [subbasinNumber, scs_area, w_cn, w_nValue, w_retC, longestFlowPath, aveSlope]
             basin_summary.append(subbasin_list)
         
+        feedback.setCurrentStep(31)
+        if feedback.isCanceled():
+            return {}
+        
         basin_header = ['Subbasin', 'area_has', 'CN', 'n-value', 'ret-c', 'LP', 'slope'] # Column names
         basin_df = pd.DataFrame(basin_summary, columns=basin_header, index=None) # save the list as a DataFrame
         basin_df.to_csv(os.path.join(wbt_file, 'basin_summary.csv')) # save the DataFrame as CSV
 
-        return 
+        return results
 
     def name(self):
         return 'wbt_catchment'
