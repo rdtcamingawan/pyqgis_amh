@@ -17,7 +17,7 @@ import glob
 import pandas as pd
 
 
-class Catchment_delineation(QgsProcessingAlgorithm):
+class wbt_catchment(QgsProcessingAlgorithm):
 
     def initAlgorithm(self, config=None):
         # Inputs
@@ -545,7 +545,7 @@ class Catchment_delineation(QgsProcessingAlgorithm):
         outputs['scs'] = processing.run("native:fieldcalculator", alg_params, context=context, feedback=feedback)['OUTPUT']
 
         # This part saves the attributes of the outputs['scs'] layer to a pandas DataFrame
-        # Saving this to a Pandas DataFrame will allow me to exit of PyQgis and do Pandas functions instead
+        # Saving this to a Pandas DataFrame will allow the code to exit of PyQgis and do Pandas functions instead
         
         # Create a Vector Layer for outputs['scs'] 
         scs_vector = QgsVectorLayer(outputs['scs'], 'scs_vector', 'ogr')
@@ -554,7 +554,25 @@ class Catchment_delineation(QgsProcessingAlgorithm):
 
         # Save all scs_vector attributes to a Pandas DataFrame
         scs_df = pd.DataFrame(scs_attrib, columns=scs_fields, index=None)
+
+        # convert all necessary columns to numericFormat
+        scs_df['area_has'] = pd.to_numeric(scs_df['area_has'], errors='coerce')
+        scs_df['CN'] = pd.to_numeric(scs_df['CN'], errors='coerce')
+        scs_df['n_value'] = pd.to_numeric(scs_df['n_value'], errors='coerce')
+        scs_df['ret-c'] = pd.to_numeric(scs_df['ret-c'], errors='coerce')
+
+        # Compute for the CN x Area
+        scs_df['mult_CN-area'] = scs_df['CN'] * scs_df['area_has']
+
+        # Compute for the Manning's n' x Area
+        scs_df['mult_n-area'] = scs_df['n_value'] * scs_df['area_has']
+
+        # Compute for the Retardance Coefficient x Area
+        scs_df['mult_retC-area'] = scs_df['ret-c'] * scs_df['area_has']
         
+        # Initialize basin_summary list for saving to csv later
+        basin_summary = []
+
         # Create geometry for WhiteBoxTools
         wbt_subbasin = QgsVectorLayer(outputs['wbt_vector_subbasins']['output'], "wbt_subbasin", 'ogr)
         wbt_dem = QgsRasterLayer(outputs['wbt_watershed']['output'], 'wbt_dem')
@@ -592,17 +610,55 @@ class Catchment_delineation(QgsProcessingAlgorithm):
                 'basins': wbt_clip['output'],
                 'output': os.path.join(wbt_file, 'tempVector.shp')
                 }
-            wbt_path = processing.run("wbt:LongestFlowpath", alg_params)
+            wbt_longestPath = processing.run("wbt:LongestFlowpath", alg_params)
 
-            filtered_df = df[df['subbasin-FID'] == 3]
+            # Save the longest flow path to a vector layer
+            wbt_longestPath = QgsVectorLayer(wbt_longestPath['output'], 'tempPath', 'ogr')
+            
+            # Get the attributes of the wbt_longestPath
+            wbt_LP_head = [f.name() for f in wbt_longestPath.fields()]
+            wbt_LP = [f.attributes() for f in wbt_longestPath.getFeatures()]
+            
+            # save the longest flow path vector to a pandas DataFrame
+            df_LP = pd.DataFrame(wbt_LP, columns= wbt_LP_head, index=None)
+            
+            # get the subbasin number of the current feature
+            subbasinNumber = fet.attributes()[0]
 
-        return results
+            # get the longest flow path, its position and the ave slope of the subbasin
+            longestFlowPathPosition = df_LP['LENGTH'].idxmax()
+            longestFlowPath = df_LP.loc[longestFlowPathPosition, 'LENGTH']
+            aveSlope = df_LP.loc[longestFlowPathPosition, 'AVG_SLOPE']
+
+            # Get the intersected vector layer
+            filtered_df = scs_df[scs_df['subbasin-FID'] == subbasinNumber]
+            
+            # get sum of area_has, CN, n_value, and ret-c
+            scs_area = filtered_df['area_has'].sum()
+            scs_cn = filtered_df['mult_CN-area'].sum()
+            scs_nValue = filtered_df['mult_n-area'].sum()
+            scs_retC = filtered_df['mult_retC-area'].sum()
+            
+            # get the weighted CN, n_value, and retardance coefficient
+            w_cn = scs_cn / scs_area
+            w_nValue = scs_nValue / scs_area
+            w_retC = scs_retC / scs_area
+            
+            # save all data to a list and append to basin_summary list
+            subbasin_list = [subbasinNumber, scs_area, w_cn, w_nValue, w_retC, longestFlowPath, aveSlope]
+            basin_summary.append(subbasin_list)
+        
+        basin_header = ['Subbasin', 'area_has', 'CN', 'n-value', 'ret-c', 'LP', 'slope'] # Column names
+        basin_df = pd.DataFrame(basin_summary, columns=basin_header, index=None) # save the list as a DataFrame
+        basin_df.to_csv(os.path.join(wbt_file, 'basin_summary.csv')) # save the DataFrame as CSV
+
+        return 
 
     def name(self):
-        return 'catchment_delineation'
+        return 'wbt_catchment'
 
     def displayName(self):
-        return 'catchment_delineation'
+        return 'wbt_catchment'
 
     def group(self):
         return ''
@@ -611,4 +667,4 @@ class Catchment_delineation(QgsProcessingAlgorithm):
         return ''
 
     def createInstance(self):
-        return Catchment_delineation()
+        return wbt_catchment()
