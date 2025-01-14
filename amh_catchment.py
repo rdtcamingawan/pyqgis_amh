@@ -175,6 +175,7 @@ class Catchment_delineation(QgsProcessingAlgorithm):
             'output':os.path.join(wbt_file, 'wbt_stream-vector.shp')
         }
         outputs['wbt_exStreams'] = processing.run("wbt:RasterStreamsToVector", alg_params, context=context, feedback=feedback, is_child_algorithm=True)
+        results['Streams'] = outputs['wbt_exStreams']['output']
 
         # WBT Snap Pour Points
         feedback.setCurrentStep(10)
@@ -211,6 +212,7 @@ class Catchment_delineation(QgsProcessingAlgorithm):
             'output':os.path.join(wbt_file, 'wbt_vector_basin.shp')   
         }
         outputs['wbt_vector_basin'] = processing.run("wbt:RasterToVectorPolygons",alg_params, context=context, feedback=feedback)
+        results['Basin'] = outputs['wbt_vector_basin']['output']
         
         # Delineate the subbasins
         feedback.setCurrentStep(13)
@@ -218,8 +220,8 @@ class Catchment_delineation(QgsProcessingAlgorithm):
             return {}
 
         alg_params = {
-            'd8_pntr':outputs['d8Pointer]['output'],
-            'streams:outputs['wbt_streams'],
+            'd8_pntr':outputs['d8Pointer']['output'],
+            'streams':outputs['wbt_streams']['output'],
             'esri_pntr':False,
             'output':os.path.join(wbt_file,'subbasins.tif')
         }
@@ -247,6 +249,7 @@ class Catchment_delineation(QgsProcessingAlgorithm):
             'output':os.path.join(wbt_file, 'wbt_vector_subbasins.shp')   
         }
         outputs['wbt_vector_subbasins'] = processing.run("wbt:RasterToVectorPolygons",alg_params, context=context, feedback=feedback)
+        results['Subbasins'] = outputs['wbt_vector_subbasins']['output']
         
         # This is the start of watershed characterization
         # All child algorithm output shall be stored in the outputs['scs'] variable
