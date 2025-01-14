@@ -10,9 +10,11 @@ from qgis.core import QgsProcessingParameterFolderDestination
 from qgis.core import QgsProcessingParameterFeatureSink
 from qgis.core import QgsExpression
 from qgis.core import QgsProcessingUtils
+from qgis.core import QgsVectorLayer
 import processing
 import os
 import glob
+import pandas as pd
 
 
 class Catchment_delineation(QgsProcessingAlgorithm):
@@ -25,14 +27,8 @@ class Catchment_delineation(QgsProcessingAlgorithm):
         self.addParameter(QgsProcessingParameterVectorLayer('outfall', 'Outfall', types=[QgsProcessing.TypeVectorPoint], defaultValue=None))
         self.addParameter(QgsProcessingParameterVectorLayer('land_cover', 'Land Cover', types=[QgsProcessing.TypeVectorPolygon], defaultValue=None))
         self.addParameter(QgsProcessingParameterVectorLayer('soil_type', 'Soil Type', types=[QgsProcessing.TypeVectorPolygon], defaultValue=None))
-        self.addParameter(QgsProcessingParameterFolderDestination('temp_folder', 'Temp Folder')) # Destinatino Temp Folder for WBT ouptuts
-        # Outputs
-        self.addParameter(QgsProcessingParameterVectorDestination('Streams', 'Streams', optional=True, type=QgsProcessing.TypeVectorAnyGeometry, createByDefault=True, defaultValue=None))
-        self.addParameter(QgsProcessingParameterVectorDestination('Basin', 'Basin', type=QgsProcessing.TypeVectorAnyGeometry, createByDefault=True, defaultValue=None))
-        self.addParameter(QgsProcessingParameterFeatureSink('Subbasins', 'Subbasins', type=QgsProcessing.TypeVectorAnyGeometry, createByDefault=True, defaultValue=None))
-
-        # Revise the outputs so that it will only be a folder input and the code will output all that I deem necessary to output
-
+        self.addParameter(QgsProcessingParameterFolderDestination('temp_folder', 'Temp Folder')) # Destination Temp Folder for WBT ouptuts
+        
     def processAlgorithm(self, parameters, context, model_feedback):
         # Use a multi-step feedback, so that individual child algorithm progress reports are adjusted for the
         # overall progress through the model
@@ -212,8 +208,7 @@ class Catchment_delineation(QgsProcessingAlgorithm):
             'output':os.path.join(wbt_file, 'wbt_vector_basin.shp')   
         }
         outputs['wbt_vector_basin'] = processing.run("wbt:RasterToVectorPolygons",alg_params, context=context, feedback=feedback)
-        results['Basin'] = outputs['wbt_vector_basin']['output']
-        
+                
         # Delineate the subbasins
         feedback.setCurrentStep(13)
         if feedback.isCanceled():
@@ -249,8 +244,7 @@ class Catchment_delineation(QgsProcessingAlgorithm):
             'output':os.path.join(wbt_file, 'wbt_vector_subbasins.shp')   
         }
         outputs['wbt_vector_subbasins'] = processing.run("wbt:RasterToVectorPolygons",alg_params, context=context, feedback=feedback)
-        results['Subbasins'] = outputs['wbt_vector_subbasins']['output']
-        
+               
         # This is the start of watershed characterization
         # All child algorithm output shall be stored in the outputs['scs'] variable
         # This is because they are all temporary outputs and I see no need to store them in different variables every time.
@@ -548,8 +542,60 @@ class Catchment_delineation(QgsProcessingAlgorithm):
             'FORMULA':'$area * 0.0001',
             'OUTPUT':'TEMPORARY_OUTPUT'
             }
-        outputs['scs'] = processing.runAndLoadResults("native:fieldcalculator", alg_params, context=context, feedback=feedback)['OUTPUT']
+        outputs['scs'] = processing.run("native:fieldcalculator", alg_params, context=context, feedback=feedback)['OUTPUT']
+
+        # This part saves the attributes of the outputs['scs'] layer to a pandas DataFrame
+        # Saving this to a Pandas DataFrame will allow me to exit of PyQgis and do Pandas functions instead
+        
+        # Create a Vector Layer for outputs['scs'] 
+        scs_vector = QgsVectorLayer(outputs['scs'], 'scs_vector', 'ogr')
+        scs_fields = [f.name() for f in scs_vector.fields()] # Pandas column header
+        scs_attrib = [f.attributes for f in scs.getFeatures()] # Pandas data
+
+        # Save all scs_vector attributes to a Pandas DataFrame
+        scs_df = pd.DataFrame(scs_attrib, columns=scs_fields, index=None)
+        
+        # Create geometry for WhiteBoxTools
+        wbt_subbasin = QgsVectorLayer(outputs['wbt_vector_subbasins']['output'], "wbt_subbasin", 'ogr)
+        wbt_dem = QgsRasterLayer(outputs['wbt_watershed']['output'], 'wbt_dem')
+        wbt_filled_dem = QgsRasterLayer(outputs['filledWangLiu']['output'], 'wbt_filled_dem')
+        
+        # Get geometry type of wbt_subbasin and display as a string
+        geometry_type_str = QgsWkbTypes.displayString(wbt_subbasin.wkbType())
+        
+        # create a vector geometry for each feature in wbt_subbasin layer
+        for fet in wbt_subbasin.getFeatures(): 
+            # create a temporary vector layer
+            vl = QgsVectorLayer(f"{geometry_type_str}?crs={wbt_subbasin.crs().authid()}", 'temp', 'memory') 
+            pr = vl.dataProvider()
+            pr.addAttributes(wbt_subbasin.fields())
+            vl.updateFields()
+            f = QgsFeature()
+            f.setGeometry(fet.geometry())
+            f.setAttributes(fet.attributes())
+            pr.addFeature(f)
+            vl.updateExtents()
             
+            # --- WHITEBOXTOOLS ---
+            # Clip watershed raster to a feature in the subbasins
+            alg_params = {
+                'input':wbt_dem,
+                'polygons':vl,
+                'maintain_dimensions':True,
+                'output': os.path.join(wbt_file, 'tempRaster.tif')
+                }
+            wbt_clip = processing.run("wbt:ClipRasterToPolygon", alg_params, context=context, feedback=feedback)
+            
+            # calculate for the longest flow path
+            alg_params = {
+                'dem': wbt_filled_dem,
+                'basins': wbt_clip['output'],
+                'output': os.path.join(wbt_file, 'tempVector.shp')
+                }
+            wbt_path = processing.run("wbt:LongestFlowpath", alg_params)
+
+            filtered_df = df[df['subbasin-FID'] == 3]
+
         return results
 
     def name(self):
