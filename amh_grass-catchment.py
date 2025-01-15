@@ -15,7 +15,7 @@ import os
 import glob
 
 
-class Catchment_delineation(QgsProcessingAlgorithm):
+class grass_catchment(QgsProcessingAlgorithm):
 
     def initAlgorithm(self, config=None):
         # Inputs
@@ -25,21 +25,19 @@ class Catchment_delineation(QgsProcessingAlgorithm):
         self.addParameter(QgsProcessingParameterVectorLayer('outfall', 'Outfall', types=[QgsProcessing.TypeVectorPoint], defaultValue=None))
         self.addParameter(QgsProcessingParameterVectorLayer('land_cover', 'Land Cover', types=[QgsProcessing.TypeVectorPolygon], defaultValue=None))
         self.addParameter(QgsProcessingParameterVectorLayer('soil_type', 'Soil Type', types=[QgsProcessing.TypeVectorPolygon], defaultValue=None))
-        self.addParameter(QgsProcessingParameterFolderDestination('temp_folder', 'Temp Folder')) # Destinatino Temp Folder for WBT ouptuts
         # Outputs
         self.addParameter(QgsProcessingParameterVectorDestination('Streams', 'Streams', optional=True, type=QgsProcessing.TypeVectorAnyGeometry, createByDefault=True, defaultValue=None))
         self.addParameter(QgsProcessingParameterVectorDestination('Basin', 'Basin', type=QgsProcessing.TypeVectorAnyGeometry, createByDefault=True, defaultValue=None))
         self.addParameter(QgsProcessingParameterFeatureSink('Subbasins', 'Subbasins', type=QgsProcessing.TypeVectorAnyGeometry, createByDefault=True, defaultValue=None))
 
-        # Revise the outputs so that it will only be a folder input and the code will output all that I deem necessary to output
 
     def processAlgorithm(self, parameters, context, model_feedback):
         # Use a multi-step feedback, so that individual child algorithm progress reports are adjusted for the
         # overall progress through the model
-        feedback = QgsProcessingMultiStepFeedback(35, model_feedback)
+        feedback = QgsProcessingMultiStepFeedback(28, model_feedback)
         results = {}
         outputs = {}
-        wbt_file = parameters['temp_folder']
+
         # reproject_dem
         alg_params = {
             'DATA_TYPE': 0,  
@@ -54,11 +52,50 @@ class Catchment_delineation(QgsProcessingAlgorithm):
             'TARGET_EXTENT': None,
             'TARGET_EXTENT_CRS': None,
             'TARGET_RESOLUTION': None,
-            'OUTPUT': QgsProcessing.TEMPORARY_OUTPUT
+            'OUTPUT': 'TEMPORARY_OUTPUT'
         }
         outputs['Reproject_dem'] = processing.run('gdal:warpreproject', alg_params, context=context, feedback=feedback, is_child_algorithm=True)
 
+        # Reproject Land Cover Layer
         feedback.setCurrentStep(1)
+        if feedback.isCanceled():
+            return {}
+
+        alg_params = {
+            'INPUT':parameters['land_cover'],
+            'TARGET_CRS':parameters['crs'],
+            'CONVERT_CURVED_GEOMETRIES':False,
+            'OUTPUT':'TEMPORARY_OUTPUT'
+        }
+        outputs['reprojected_lc'] = processing.run('native:reprojectlayer', alg_params, context=context, feedback=feedback, is_child_algorithm=True)
+
+        # Reproject Soil Layer
+        feedback.setCurrentStep(2)
+        if feedback.isCanceled():
+            return {}
+
+        alg_params = {
+            'INPUT':parameters['soil_type'],
+            'TARGET_CRS':parameters['crs'],
+            'CONVERT_CURVED_GEOMETRIES':False,
+            'OUTPUT':'TEMPORARY_OUTPUT'
+        }
+        outputs['reprojected_soil'] = processing.run('native:reprojectlayer', alg_params, context=context, feedback=feedback, is_child_algorithm=True)
+
+        # Reproject Outfall Layer
+        feedback.setCurrentStep(3)
+        if feedback.isCanceled():
+            return {}
+
+        alg_params = {
+            'INPUT':parameters['outfall'],
+            'TARGET_CRS':parameters['crs'],
+            'CONVERT_CURVED_GEOMETRIES':False,
+            'OUTPUT':'TEMPORARY_OUTPUT'
+        }
+        outputs['reprojected_outfall'] = processing.run('native:reprojectlayer', alg_params, context=context, feedback=feedback, is_child_algorithm=True)
+
+        feedback.setCurrentStep(4)
         if feedback.isCanceled():
             return {}
         
@@ -71,13 +108,13 @@ class Catchment_delineation(QgsProcessingAlgorithm):
             'GRASS_REGION_PARAMETER': None,
             'format': 0,  # grass
             'input': outputs['Reproject_dem']['OUTPUT'],
-            'areas': QgsProcessing.TEMPORARY_OUTPUT,
-            'direction': QgsProcessing.TEMPORARY_OUTPUT,
-            'output': QgsProcessing.TEMPORARY_OUTPUT
+            'areas': 'TEMPORARY_OUTPUT',
+            'direction': 'TEMPORARY_OUTPUT',
+            'output': 'TEMPORARY_OUTPUT'
         }
         outputs['FillSinks'] = processing.run('grass:r.fill.dir', alg_params, context=context, feedback=feedback, is_child_algorithm=True)
 
-        feedback.setCurrentStep(2)
+        feedback.setCurrentStep(5)
         if feedback.isCanceled():
             return {}
 
@@ -101,13 +138,13 @@ class Catchment_delineation(QgsProcessingAlgorithm):
             'max_slope_length': None,
             'memory': 300,
             'threshold': parameters['minimum_area'],
-            'basin': QgsProcessing.TEMPORARY_OUTPUT,
-            'drainage': QgsProcessing.TEMPORARY_OUTPUT,
-            'stream': QgsProcessing.TEMPORARY_OUTPUT
+            'basin': 'TEMPORARY_OUTPUT',
+            'drainage': 'TEMPORARY_OUTPUT',
+            'stream': 'TEMPORARY_OUTPUT'
         }
         outputs['Streams'] = processing.run('grass:r.watershed', alg_params, context=context, feedback=feedback, is_child_algorithm=True)
 
-        feedback.setCurrentStep(3)
+        feedback.setCurrentStep(6)
         if feedback.isCanceled():
             return {}
 
@@ -128,11 +165,11 @@ class Catchment_delineation(QgsProcessingAlgorithm):
             'column': 'value',
             'input': outputs['Streams']['basin'],
             'type': 2,  # area
-            'output': QgsProcessing.TEMPORARY_OUTPUT
+            'output': 'TEMPORARY_OUTPUT'
         }
         outputs['Subbasins'] = processing.run('grass:r.to.vect', alg_params, context=context, feedback=feedback, is_child_algorithm=True)
 
-        feedback.setCurrentStep(4)
+        feedback.setCurrentStep(7)
         if feedback.isCanceled():
             return {}
 
@@ -146,11 +183,11 @@ class Catchment_delineation(QgsProcessingAlgorithm):
             'GRASS_REGION_PARAMETER': None,
             'input': outputs['Streams']['stream'],
             'iterations': 999,
-            'output': QgsProcessing.TEMPORARY_OUTPUT
+            'output': 'TEMPORARY_OUTPUT'
         }
         outputs['Thin_streams'] = processing.run('grass:r.thin', alg_params, context=context, feedback=feedback, is_child_algorithm=True)
 
-        feedback.setCurrentStep(6)
+        feedback.setCurrentStep(8)
         if feedback.isCanceled():
             return {}
 
@@ -171,27 +208,11 @@ class Catchment_delineation(QgsProcessingAlgorithm):
             'column': 'value',
             'input': outputs['Thin_streams']['output'],
             'type': 0,  # line
-            'output': QgsProcessing.TEMPORARY_OUTPUT
+            'output': 'TEMPORARY_OUTPUT'
         }
         outputs['Stream_vector'] = processing.run('grass:r.to.vect', alg_params, context=context, feedback=feedback, is_child_algorithm=True)
 
-        feedback.setCurrentStep(7)
-        if feedback.isCanceled():
-            return {}
-
-        # Reproject Outfall
-        # reproject input point outfall as the 
-        # same CRS given by the user
-        alg_params = {
-            'CONVERT_CURVED_GEOMETRIES': False,
-            'INPUT': parameters['outfall'],
-            'OPERATION': None,
-            'TARGET_CRS': parameters['crs'],
-            'OUTPUT': QgsProcessing.TEMPORARY_OUTPUT
-        }
-        outputs['ReprojectOutfall'] = processing.run('native:reprojectlayer', alg_params, context=context, feedback=feedback, is_child_algorithm=True)
-
-        feedback.setCurrentStep(5)
+        feedback.setCurrentStep(9)
         if feedback.isCanceled():
             return {}
         
@@ -199,14 +220,14 @@ class Catchment_delineation(QgsProcessingAlgorithm):
         # to the nearest stream vector
         alg_params = {
             'BEHAVIOR': 1,  # Prefer closest point, insert extra vertices where required
-            'INPUT': outputs['ReprojectOutfall']['OUTPUT'],
+            'INPUT': outputs['reprojected_outfall']['OUTPUT'],
             'REFERENCE_LAYER': outputs['Stream_vector']['output'],
             'TOLERANCE': 200,
-            'OUTPUT': QgsProcessing.TEMPORARY_OUTPUT
+            'OUTPUT': 'TEMPORARY_OUTPUT'
         }
         outputs['Snapped'] = processing.run('native:snapgeometries', alg_params, context=context, feedback=feedback, is_child_algorithm=True)
 
-        feedback.setCurrentStep(8)
+        feedback.setCurrentStep(10)
         if feedback.isCanceled():
             return {}
 
@@ -229,7 +250,7 @@ class Catchment_delineation(QgsProcessingAlgorithm):
             'GRASS_REGION_PARAMETER': None,
             'coordinates': f'{pt.x()}, {pt.y()}',
             'input': outputs['Streams']['drainage'],
-            'output': QgsProcessing.TEMPORARY_OUTPUT
+            'output': 'TEMPORARY_OUTPUT'
         }
         outputs['Basin'] = processing.run('grass:r.water.outlet', alg_params, context=context, feedback=feedback, is_child_algorithm=True)
 
@@ -241,7 +262,7 @@ class Catchment_delineation(QgsProcessingAlgorithm):
         # convert basin raster to vector
         alg_params = {
             '-b': False,
-            '-s': True,
+            '-s': False,
             '-t': False,
             '-v': False,
             '-z': False,
@@ -264,7 +285,8 @@ class Catchment_delineation(QgsProcessingAlgorithm):
             
         # fix geometries
         # fix subbasins geometry
-        alg_params = {'INPUT': outputs['Subbasins']['output'],
+        alg_params = {
+            'INPUT': outputs['Subbasins']['output'],
             'METHOD':1,
             'OUTPUT':'TEMPORARY_OUTPUT'}
         outputs['fixed_subbasins'] = processing.run("native:fixgeometries", alg_params, context = context, feedback=feedback)
@@ -328,7 +350,7 @@ class Catchment_delineation(QgsProcessingAlgorithm):
             'TARGET_EXTENT': None,
             'X_RESOLUTION': None,
             'Y_RESOLUTION': None,
-            'OUTPUT': QgsProcessing.TEMPORARY_OUTPUT
+            'OUTPUT': 'TEMPORARY_OUTPUT'
         }
         outputs['Clip_dem'] = processing.run('gdal:cliprasterbymasklayer', alg_params, context=context, feedback=feedback, is_child_algorithm=True)
         
@@ -363,105 +385,6 @@ class Catchment_delineation(QgsProcessingAlgorithm):
         outputs['Detailed_streams'] = processing.run('grass:r.stream.extract', alg_params, context=context, feedback=feedback, is_child_algorithm=True)
         results['Streams'] = outputs['Detailed_streams']['stream_vector']
 
-        # Delineate watershed using WhiteBoxTools\
-        # delineating using WhiteBoxTools to solve for the 
-        # longest flow path which will be used for 
-        # later in the watershed characterization
-        # and rational method computation
-
-        # WBT Filled Dem
-        feedback.setCurrentStep(18)
-        if feedback.isCanceled():
-            return {}
-        
-        alg_params = {
-            'dem': outputs['Reproject_dem']['OUTPUT'],
-            'fix_flats':True,
-            'flat_increment':None,
-            'output':os.path.join(wbt_file, 'wbt_filledWandandLiu.tif')
-        }
-        outputs['filledWangLiu'] = processing.run("wbt:FillDepressionsWangAndLiu", alg_params, context=context, feedback=feedback, is_child_algorithm=True)
-
-        # WBT D8 Pointer
-        feedback.setCurrentStep(19)
-        if feedback.isCanceled():
-            return {}
-        
-        alg_params = {
-            'dem':outputs['filledWangLiu']['output'],
-            'esri_pntr':False,
-            'output': os.path.join(wbt_file, 'wbt_d8pointer.tif')
-        }
-        outputs['d8Pointer'] = processing.run("wbt:D8Pointer", alg_params, context=context, feedback=feedback, is_child_algorithm=True)
-
-        # WBT D8 Flow Accumulation
-        feedback.setCurrentStep(20)
-        if feedback.isCanceled():
-            return {}
-
-        alg_params = {
-            'input': outputs['filledWangLiu']['output'],
-            'out_type':0,
-            'log':False,
-            'clip':False,
-            'pntr':False,
-            'esri_pntr':False,
-            'output':os.path.join(wbt_file, 'wbt_flowaccum.tif')
-        }
-        outputs['d8FlowAccum'] = processing.run("wbt:D8FlowAccumulation", alg_params, context=context, feedback=feedback, is_child_algorithm=True)
-
-        # WBT Extract Streams
-        feedback.setCurrentStep(21)
-        if feedback.isCanceled():
-            return {} 
-
-        alg_params = {
-            'flow_accum':outputs['d8FlowAccum']['output'],
-            'threshold':10000,
-            'zero_background':False,
-            'output':os.path.join(wbt_file, 'wbt_streams-raster.tif')
-        }
-        outputs['wbt_streams'] = processing.run("wbt:ExtractStreams", alg_params, context=context, feedback=feedback, is_child_algorithm=True)
-
-        # WBT Raster Streams to Vector
-        feedback.setCurrentStep(22)
-        if feedback.isCanceled():
-            return {}
-        
-        alg_params = {
-            'streams': outputs['wbt_streams']['output'],
-            'd8_pntr':outputs['d8Pointer']['output'],
-            'esri_pntr':False,
-            'output':os.path.join(wbt_file, 'wbt_stream-vector.shp')
-        }
-        outputs['wbt_exStreams'] = processing.run("wbt:RasterStreamsToVector", alg_params, context=context, feedback=feedback, is_child_algorithm=True)
-
-        # WBT Snap Pour Points
-        feedback.setCurrentStep(23)
-        if feedback.isCanceled():
-            return {}
-        
-        alg_params = {
-            'pour_pts':outputs['Snapped']['OUTPUT'],
-            'streams':outputs['wbt_streams']['output'],
-            'snap_dist':1000,
-            'output':os.path.join(wbt_file, 'wbt_snapped_outfall.shp')
-        }
-        outputs['jenson_snapped'] = processing.run("wbt:JensonSnapPourPoints", alg_params, context=context, feedback=feedback, is_child_algorithm=True)
-
-        # WBT Delineate Watershed
-        feedback.setCurrentStep(24)
-        if feedback.isCanceled():
-            return {}
-        
-        alg_params = {
-            'd8_pntr':outputs['d8Pointer']['output'],
-            'pour_pts': outputs['jenson_snapped']['output'],
-            'esri_pntr':False,
-            'output':os.path.join(wbt_file, 'wbt_watershed.tif')
-        }
-        outputs['wbt_watershed'] = processing.run("wbt:Watershed", alg_params, context=context, feedback=feedback)
-
         # This is the start of watershed characterization
         # all child algorithm output shall be stored in the outputs['scs'] variable
         # this is because they are all temporary output and there I see no need to store it in diffferent variable everytime.
@@ -469,46 +392,53 @@ class Catchment_delineation(QgsProcessingAlgorithm):
 
         #fix geometries
         # fix basins
-        feedback.setCurrentStep(25)
+        alg_params = {
+             'INPUT': outputs['clipped_subbasins']['OUTPUT'], 
+             'METHOD': 0, 
+             'OUTPUT': 'TEMPORARY_OUTPUT'
+             }
+        outputs['fixed_subbasins'] = processing.run("native:fixgeometries", alg_params, context=context, feedback=feedback, is_child_algorithm=True)
+
+        feedback.setCurrentStep(18)
         if feedback.isCanceled():
             return {}
 
         # fix land
         alg_params = {
-             'INPUT': parameters['land_cover'], 
-             'METHOD': 1, 
+             'INPUT': outputs['reprojected_lc']['OUTPUT'], 
+             'METHOD': 0, 
              'OUTPUT': 'TEMPORARY_OUTPUT'
              }
         outputs['fixed_lc'] = processing.run("native:fixgeometries", alg_params, context=context, feedback=feedback, is_child_algorithm=True)
 
         # fix soil
-        feedback.setCurrentStep(26)
+        feedback.setCurrentStep(19)
         if feedback.isCanceled():
             return {}
 
         alg_params = {
-             'INPUT': parameters['soil_type'], 
-             'METHOD': 1, 
+             'INPUT': outputs['reprojected_soil']['OUTPUT'], 
+             'METHOD': 0, 
              'OUTPUT': 'TEMPORARY_OUTPUT'
              }
         outputs['fixed_soil'] = processing.run("native:fixgeometries", alg_params, context=context, feedback=feedback, is_child_algorithm=True)
 
         #intersect basin - land cover
-        feedback.setCurrentStep(27)
+        feedback.setCurrentStep(20)
         if feedback.isCanceled():
             return {}
 
         alg_params = {
             'INPUT': outputs['fixed_lc']['OUTPUT'], 
-            'OVERLAY': outputs['clipped_subbasins']['OUTPUT'], # This is the clipped subbasins output
+            'OVERLAY': outputs['fixed_subbasins']['OUTPUT'], # This is the clipped subbasins output
             'INPUT_FIELDS':['class_name'], # This retains the class_name field in the land cover
             'OVERLAY_FIELDS':['name'], # This retains the `name` field in the basins vector
-            'OVERLAY_FIELDS_PREFIX':'',
+            'OVERLAY_FIELDS_PREFIX':'subbasin',
             'OUTPUT': 'TEMPORARY_OUTPUT'}
         outputs['scs'] = processing.run("native:intersection", alg_params, context=context, feedback=feedback, is_child_algorithm=True)
 
         #intersect basin - land - soil
-        feedback.setCurrentStep(28)
+        feedback.setCurrentStep(21)
         if feedback.isCanceled():
             return {}
 
@@ -520,7 +450,7 @@ class Catchment_delineation(QgsProcessingAlgorithm):
         outputs['scs'] = processing.run("native:intersection", alg_params, context=context, feedback=feedback, is_child_algorithm=True)['OUTPUT']
 
         # add retardance coefficient
-        feedback.setCurrentStep(29)
+        feedback.setCurrentStep(22)
         if feedback.isCanceled():
             return {}
 
@@ -552,7 +482,7 @@ class Catchment_delineation(QgsProcessingAlgorithm):
         outputs['scs'] = processing.run("native:fieldcalculator", alg_params, context=context, feedback=feedback, is_child_algorithm=True)['OUTPUT']
 
         # add runoff coefficient
-        feedback.setCurrentStep(30)
+        feedback.setCurrentStep(23)
         if feedback.isCanceled():
             return {}
 
@@ -595,7 +525,7 @@ class Catchment_delineation(QgsProcessingAlgorithm):
         outputs['scs'] = processing.run("native:fieldcalculator", alg_params, context=context, feedback=feedback, is_child_algorithm=True)['OUTPUT']
 
         # assign HSG value
-        feedback.setCurrentStep(31)
+        feedback.setCurrentStep(24)
         if feedback.isCanceled():
             return {}
 
@@ -620,7 +550,7 @@ class Catchment_delineation(QgsProcessingAlgorithm):
         outputs['scs'] = processing.run("native:fieldcalculator", alg_params, context=context, feedback=feedback, is_child_algorithm=True)['OUTPUT']
 
         #add Manning's N Field
-        feedback.setCurrentStep(32)
+        feedback.setCurrentStep(25)
         if feedback.isCanceled():
             return {}
 
@@ -652,7 +582,7 @@ class Catchment_delineation(QgsProcessingAlgorithm):
         outputs['scs'] = processing.run("native:fieldcalculator", alg_params, context=context, feedback=feedback, is_child_algorithm=True)['OUTPUT']
 
         # add ret-c#
-        feedback.setCurrentStep(33)
+        feedback.setCurrentStep(26)
         if feedback.isCanceled():
             return {}
 
@@ -676,7 +606,7 @@ class Catchment_delineation(QgsProcessingAlgorithm):
         outputs['scs'] = processing.run("native:fieldcalculator", alg_params, context=context, feedback=feedback, is_child_algorithm=True)['OUTPUT']
 
         # add curve number
-        feedback.setCurrentStep(34)
+        feedback.setCurrentStep(27)
         if feedback.isCanceled():
             return {}
 
@@ -733,7 +663,7 @@ class Catchment_delineation(QgsProcessingAlgorithm):
         outputs['scs'] = processing.run("native:fieldcalculator", alg_params, context=context, feedback=feedback, is_child_algorithm=True)['OUTPUT']
 
         # calculate area of each vector
-        feedback.setCurrentStep(35)
+        feedback.setCurrentStep(28)
         if feedback.isCanceled():
             return {}
 
@@ -746,15 +676,15 @@ class Catchment_delineation(QgsProcessingAlgorithm):
             'FORMULA':'$area * 0.0001',
             'OUTPUT':'TEMPORARY_OUTPUT'
             }
-        outputs['scs'] = processing.run("native:fieldcalculator", alg_params, context=context, feedback=feedback)['OUTPUT']
+        outputs['scs'] = processing.runAndLoadResults("native:fieldcalculator", alg_params, context=context, feedback=feedback)['OUTPUT']
             
         return results 
 
     def name(self):
-        return 'catchment_delineation'
+        return 'grass_catchment'
 
     def displayName(self):
-        return 'catchment_delineation'
+        return 'grass_catchment'
 
     def group(self):
         return ''
@@ -763,4 +693,4 @@ class Catchment_delineation(QgsProcessingAlgorithm):
         return ''
 
     def createInstance(self):
-        return Catchment_delineation()
+        return grass_catchment()
