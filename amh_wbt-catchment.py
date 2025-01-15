@@ -14,6 +14,7 @@ from qgis.core import QgsVectorLayer
 from qgis.core import QgsRasterLayer
 from qgis.core import QgsWkbTypes
 from qgis.core import QgsFeature
+from decimal import Decimal, getcontext
 import processing
 import os
 import glob
@@ -655,16 +656,160 @@ class wbt_catchment(QgsProcessingAlgorithm):
             w_cn = scs_cn / scs_area
             w_nValue = scs_nValue / scs_area
             w_retC = scs_retC / scs_area
+
+            """
+
+
+            This section determines which method is applicable for the computation of the time of concentration.
+            It will then solves for the appropriate time of concentration. 
+
+
+            """
+            # Define all global variables needed for each rational method functions
+
+            a, d, b = 1666.19, 7.70 ,-0.65
+            rc = w_retC	
+            c = 0.43
+            n = w_nValue
+            cn = w_cn
+            l, s, area = longestFlowPath * 3.28084, aveSlope/100, scs_area * 0.01
+            _threshold = 10e-10
+
+            # Determine what method should be used
+            def rational_method(slope, area):
+                area_acres = area * 247.105
+                if 3 <= slope <= 10 and 1 <= area_acres <= 112:
+                    return kirpich(a, d, b, l, s, c, area)
+                elif slope > 0 and area_acres < 5:  # Condition for Izzard (1946)
+                    return izzard(a, d, b, rc, l, slope, c, area, _threshold)
+                elif slope > 0 and area_acres > 112:  # Condition for Federal Aviation Admin. (1970)
+                    return faa(a, d, b, rc, l, slope, c, area)
+                elif slope >= 0 and area_acres:  # Condition for Kinematic Wave Formulas
+                    return kinematic(a, d, b, n, l, slope, c, area, _threshold)
+                elif slope <= 2000 and area_acres < 3:  # Condition for SCS Lag Equation (1975)
+                    return scs(a, d, b, cn, l, slope, c, area)
+                else:
+                    return "No applicable method"
+            
+            def kirpich(a, d, b, length, slope, c, area):
+                tc = 0.0078 * length ** 0.77 * slope**-0.385
+                i = a * (tc + d)**b
+                q = 0.278 * c * i * area
+                return q, tc
+
+            def faa(a, d, b, rc, length, slope, c, area):
+                slope = slope * 100
+                tc = (1.8 * (1.1 - rc) * length**0.5) / slope**0.33
+                i = a * (tc + d) **b
+                q = 0.278 * c * i * area
+                return q, tc
+
+            def scs(a, d, b, cn, length, slope, c, area):
+                slope = slope * 100
+                tc = (100 * length** 0.8 * ((1000 / cn)-9)**0.7) / (1900 * slope**0.5)
+                i = a*(tc+d)**b
+                q = 0.278 * c * i * area
+                return q, tc
+            
+            def i_izzard(a, d, b, length, slope, c,i_iter):
+                tc = (41.025 * ((0.0007 * i_iter) + c) * length**0.33) / (slope**(1/3) * i_iter**(2/3))
+                i_calc_mm = a * (tc + d)**b
+                i_calc = i_calc_mm / 10 / 2.54
+                return i_calc , i_iter
+
+            def izzard(a, d, b, rc, length, slope, c, area, _threshold):
+                lower = 0
+                upper = 5000
+                solve = (lower + upper) / 2
+                threshold = i_izzard(solve)[0] - solve  # Compute initial threshold
+                
+                while abs(threshold) >= _threshold:        
+                    if threshold < 0:
+                        upper = solve
+                    elif threshold > 0:
+                        lower = solve
+                    # Update solve based on new bounds
+                    solve = (lower + upper) / 2
+                    # Recompute threshold with updated solve
+                    threshold = i_izzard(solve)[0] - solve
+
+                tc = (41.025 * ((0.0007 * solve) + rc) * length**0.33) / (slope**(1/3) * solve**(2/3))
+                i = a * (tc+d) **b
+                q = 0.278 * c * i * area
+                
+                return q, tc
+
+            def i_kinematic(a, d, b, length, slope, n, i_iter):
+                # Set precision for calculations
+                getcontext().prec = 50  # High precision for critical calculations
+
+                # Convert inputs to Decimal
+                a = Decimal(a)
+                d = Decimal(d)
+                b = Decimal(b)
+                length = Decimal(length)
+                slope = Decimal(slope)
+                n = Decimal(n)
+                i_iter = Decimal(i_iter)
+
+                # Perform calculations
+                tc = (Decimal("0.94") * (length ** Decimal("0.6") * n ** Decimal("0.6"))) / (
+                    i_iter ** Decimal("0.4") * slope ** Decimal("0.33")
+                )
+                i_calc_mm = a * (tc + d) ** b
+                i_calc = i_calc_mm / Decimal("10") / Decimal("2.54")
+                return i_calc, i_iter
+
+            def kinematic(a, d, b, n, length, slope, c, area, _threshold):
+                # Set precision for calculations
+                getcontext().prec = 50
+
+                # Convert inputs to Decimal
+                a = Decimal(a)
+                d = Decimal(d)
+                b = Decimal(b)
+                n = Decimal(n)
+                length = Decimal(length)
+                slope = Decimal(slope)
+                c = Decimal(c)
+                area = Decimal(area)
+                _threshold = Decimal(_threshold)
+
+                lower = Decimal("0")
+                upper = Decimal("1000")
+                solve = (lower + upper) / Decimal("2")
+                threshold = i_kinematic(a, d, b, length, slope, n, solve)[0] - solve
+
+                threshold_plot = []
+                while abs(threshold) >= _threshold:
+                    if threshold < 0:
+                        upper = solve
+                    elif threshold > 0:
+                        lower = solve
+                    solve = (lower + upper) / Decimal("2")
+                    threshold = i_kinematic(a, d, b, length, slope, n, solve)[0] - solve
+                    threshold_plot.append(threshold)
+
+                tc = (Decimal("0.94") * (length ** Decimal("0.6") * n ** Decimal("0.6"))) / (
+                    solve ** Decimal("0.4") * slope ** Decimal("0.33")
+                )
+                i = a * (tc + d) ** b
+                q = Decimal("0.278") * c * i * area
+
+                return float(q), float(tc)
+
+            timeConc = rational_method(slope=aveSlope, area= scs_area * 0.01)[1]
+            peakDischarge = rational_method(slope=aveSlope, area= scs_area * 0.01)[0]
             
             # save all data to a list and append to basin_summary list
-            subbasin_list = [subbasinNumber, scs_area, w_cn, w_nValue, w_retC, longestFlowPath, aveSlope]
+            subbasin_list = [subbasinNumber, scs_area, w_cn, w_nValue, w_retC, longestFlowPath, aveSlope, timeConc, peakDischarge]
             basin_summary.append(subbasin_list)
         
         feedback.setCurrentStep(31)
         if feedback.isCanceled():
             return {}
         
-        basin_header = ['Subbasin', 'area_has', 'CN', 'n-value', 'ret-c', 'LP', 'slope'] # Column names
+        basin_header = ['Subbasin', 'area_has', 'CN', 'n-value', 'ret-c', 'LP', 'slope', 'timeOfConc', 'peakQ'] # Column names
         basin_df = pd.DataFrame(basin_summary, columns=basin_header, index=None) # save the list as a DataFrame
         basin_df.to_csv(os.path.join(wbt_file, 'basin_summary.csv')) # save the DataFrame as CSV
 
