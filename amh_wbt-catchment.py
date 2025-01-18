@@ -7,6 +7,7 @@ from qgis.core import QgsProcessingParameterNumber
 from qgis.core import QgsProcessingParameterVectorLayer
 from qgis.core import QgsProcessingParameterVectorDestination
 from qgis.core import QgsProcessingParameterFolderDestination
+from qgis.core import QgsProcessingParameterFileDestination
 from qgis.core import QgsProcessingParameterFeatureSink
 from qgis.core import QgsExpression
 from qgis.core import QgsProcessingUtils
@@ -23,6 +24,148 @@ import pandas as pd
 
 class wbt_catchment(QgsProcessingAlgorithm):
 
+    def kirpich(a, d, b, length, slope, c, area):
+        tc = 0.0078 * length ** 0.77 * slope**-0.385
+        tc = max(tc, 5) # Sets the min. tc to 5mins
+        return tc
+
+    def faa(a, d, b, rc, length, slope, c, area):
+        slope = slope * 100
+        tc = (1.8 * (1.1 - rc) * length**0.5) / slope**0.33
+        tc = max(tc, 5) # Sets the min. tc to 5mins
+        return tc
+
+    def scs(a, d, b, cn, length, slope, c, area):
+        slope = slope * 100
+        tc = (100 * length** 0.8 * ((1000 / cn)-9)**0.7) / (1900 * slope**0.5)
+        tc = max(tc, 5) # Sets the min. tc to 5mins
+        return tc
+    
+    def i_izzard(a, d, b, length, slope, c,i_iter):
+        tc = (41.025 * ((0.0007 * i_iter) + c) * length**0.33) / (slope**(1/3) * i_iter**(2/3))
+        i_calc_mm = a * (tc + d)**b
+        i_calc = i_calc_mm / 10 / 2.54
+        return i_calc , i_iter
+
+    def izzard(a, d, b, rc, length, slope, c, area, _threshold):
+        lower = 0
+        upper = 5000
+        solve = (lower + upper) / 2
+        threshold = i_izzard(solve)[0] - solve  # Compute initial threshold
+        
+        while abs(threshold) >= _threshold:        
+            if threshold < 0:
+                upper = solve
+            elif threshold > 0:
+                lower = solve
+            # Update solve based on new bounds
+            solve = (lower + upper) / 2
+            # Recompute threshold with updated solve
+            threshold = i_izzard(solve)[0] - solve
+
+        tc = (41.025 * ((0.0007 * solve) + rc) * length**0.33) / (slope**(1/3) * solve**(2/3))
+        tc = max(tc, 5) # Sets the min. tc to 5mins
+        return tc
+
+    def i_kinematic(a, d, b, length, slope, n, i_iter):
+        # Set precision for calculations
+        getcontext().prec = 50  # High precision for critical calculations
+
+        # Convert inputs to Decimal
+        a = Decimal(a)
+        d = Decimal(d)
+        b = Decimal(b)
+        length = Decimal(length)
+        slope = Decimal(slope)
+        n = Decimal(n)
+        i_iter = Decimal(i_iter)
+
+        # Perform calculations
+        tc = (Decimal("0.94") * (length ** Decimal("0.6") * n ** Decimal("0.6"))) / (
+            i_iter ** Decimal("0.4") * slope ** Decimal("0.33")
+        )
+        i_calc_mm = a * (tc + d) ** b
+        i_calc = i_calc_mm / Decimal("10") / Decimal("2.54")
+        return i_calc, i_iter
+
+    def kinematic(a, d, b, n, length, slope, c, area, _threshold):
+        # Set precision for calculations
+        getcontext().prec = 50
+
+        # Convert inputs to Decimal
+        a = Decimal(a)
+        d = Decimal(d)
+        b = Decimal(b)
+        n = Decimal(n)
+        length = Decimal(length)
+        slope = Decimal(slope)
+        c = Decimal(c)
+        area = Decimal(area)
+        _threshold = Decimal(_threshold)
+
+        lower = Decimal("0")
+        upper = Decimal("1000")
+        solve = (lower + upper) / Decimal("2")
+        threshold = i_kinematic(a, d, b, length, slope, n, solve)[0] - solve
+
+        threshold_plot = []
+        while abs(threshold) >= _threshold:
+            if threshold < 0:
+                upper = solve
+            elif threshold > 0:
+                lower = solve
+            solve = (lower + upper) / Decimal("2")
+            threshold = i_kinematic(a, d, b, length, slope, n, solve)[0] - solve
+            threshold_plot.append(threshold)
+
+        tc = (Decimal("0.94") * (length ** Decimal("0.6") * n ** Decimal("0.6"))) / (
+            solve ** Decimal("0.4") * slope ** Decimal("0.33"))
+        tc = max(tc, 5) # Sets the min. tc to 5mins
+        return float(tc)
+    
+    def time_of_conc(a, d, b, rc, n, cn, slope, area, l, c, _threshold):
+        # Determine what applicable method should be used for tc
+        # Append the applicable tc to tc_list
+        # Return the max tc
+
+        tc_list = [] # Intialize a list of time of concentration
+        area_acres = area * 247.105 # converts
+        
+        if 3 <= slope <= 10 and 1 <= area_acres <= 112:
+            tc_list.append(kirpich(a, d, b, l, slope, c, area))
+        
+        if slope > 0 and area_acres < 5:  # Condition for Izzard (1946)
+            tc_list.append(izzard(a, d, b, rc, l, slope, c, area, _threshold))
+        
+        if slope > 0 and area_acres > 112:  # Condition for Federal Aviation Admin. (1970)
+            tc_list.append(faa(a, d, b, rc, l, slope, c, area))
+        
+        if slope >= 0 and area_acres:  # Condition for Kinematic Wave Formulas
+            tc_list.append(kinematic(a, d, b, n, l, slope, c, area, _threshold))
+        
+        if slope <= 2000 and area_acres < 3:  # Condition for SCS Lag Equation (1975)
+            tc_list.append(scs(a, d, b, cn, l, slope, c, area))
+        
+        else:
+            tc_list.append(0) # If there are no applicable method this function will return tc=0
+        
+        return max(tc_list) 
+    
+    def runoff_df():
+        data_runoff_c = {
+                'class_run_c': ['AS', 'CN', 'GPF', 'GPA', 'GPS', 'GFF', 'GFA', 'GFS', 'GGF', 'GGA', 'GGS', 'CLF', 'CLA', 'CLS',
+                    'PRF', 'PRA', 'PRS', 'FWF', 'FWA', 'FWS'],
+                2: [0.73, 0.75, 0.32, 0.37, 0.40, 0.25, 0.33, 0.37, 0.21, 0.29, 0.34, 0.31, 0.35, 0.39, 0.25, 0.33, 0.37, 0.20, 0.31, 0.35],
+                5: [0.77, 0.80, 0.34, 0.40, 0.43, 0.28, 0.36, 0.40, 0.23, 0.32, 0.37, 0.34, 0.38, 0.42, 0.28, 0.36, 0.40, 0.25, 0.34, 0.39],
+                10: [0.81, 0.83, 0.37, 0.43, 0.45, 0.30, 0.38, 0.42, 0.25, 0.35, 0.40, 0.36, 0.41, 0.44, 0.30, 0.38, 0.42, 0.28, 0.36, 0.41],
+                15: [0.83, 0.85, 0.38, 0.44, 0.46, 0.31, 0.39, 0.43, 0.26, 0.36, 0.41, 0.37, 0.42, 0.45, 0.31, 0.39, 0.43, 0.29, 0.37, 0.42],
+                25: [0.86, 0.88, 0.40, 0.46, 0.49, 0.34, 0.42, 0.46, 0.29, 0.39, 0.44, 0.40, 0.44, 0.48, 0.34, 0.42, 0.46, 0.31, 0.40, 0.45],
+                50: [0.90, 0.92, 0.44, 0.49, 0.52, 0.37, 0.45, 0.49, 0.32, 0.42, 0.47, 0.43, 0.48, 0.51, 0.37, 0.45, 0.49, 0.35, 0.43, 0.48],
+                100: [0.95, 0.97, 0.47, 0.53, 0.55, 0.41, 0.49, 0.53, 0.36, 0.46, 0.51, 0.47, 0.51, 0.54, 0.41, 0.49, 0.53, 0.39, 0.47, 0.52],
+                500: [1.00, 1.00, 0.58, 0.61, 0.62, 0.58, 0.58, 0.60, 0.49, 0.56, 0.58, 0.57, 0.60, 0.61, 0.53, 0.58, 0.60, 0.48, 0.56, 0.58]
+            }
+        return pd.DataFrame(data_runoff_c)
+
     def initAlgorithm(self, config=None):
         # Inputs
         self.addParameter(QgsProcessingParameterCrs('crs', 'CRS', defaultValue='EPSG:4326'))
@@ -31,7 +174,8 @@ class wbt_catchment(QgsProcessingAlgorithm):
         self.addParameter(QgsProcessingParameterVectorLayer('outfall', 'Outfall', types=[QgsProcessing.TypeVectorPoint], defaultValue=None))
         self.addParameter(QgsProcessingParameterVectorLayer('land_cover', 'Land Cover', types=[QgsProcessing.TypeVectorPolygon], defaultValue=None))
         self.addParameter(QgsProcessingParameterVectorLayer('soil_type', 'Soil Type', types=[QgsProcessing.TypeVectorPolygon], defaultValue=None))
-        self.addParameter(QgsProcessingParameterFolderDestination('temp_folder', 'Temp Folder')) # Destination Temp Folder for WBT ouptuts
+        self.addParameter(QgsProcessingParameterFolderDestination('temp_folder', 'Save Folder')) # Destination Temp Folder for WBT ouptuts
+        self.addParameter(QgsProcessingParameterFileDestination('reg_csv', 'Regression CSV'))
         
     def processAlgorithm(self, parameters, context, model_feedback):
         # Use a multi-step feedback, so that individual child algorithm progress reports are adjusted for the
@@ -549,10 +693,20 @@ class wbt_catchment(QgsProcessingAlgorithm):
         outputs['scs'] = processing.run("native:fieldcalculator", alg_params, context=context, feedback=feedback)['OUTPUT']
 
         # This part saves the attributes of the outputs['scs'] layer to a pandas DataFrame
-        # Saving this to a Pandas DataFrame will allow the code to exit of PyQgis and do Pandas functions instead
+        # Saving this to a Pandas DataFrame will allow the code to exit of PyQgis and do Pandas functions instead\
+
         feedback.setCurrentStep(28)
         if feedback.isCanceled():
             return {}
+        
+        # Initialize the column header names for the basin summary
+        basin_header = ['Subbasin', 'area_has', 'CN', 'n-value', 'ret-c', 'LP', 'slope'] # Column names for the Basin summary
+        
+        # Create a Pandas DataFrame for the user input regression coefficient csv
+        reg_df = pd.read_csv(parameters['reg_csv'])
+
+        # Call the run-off coefficient Dataframe
+        runC_df = runoff_df()
         
         # Create a Vector Layer for outputs['scs'] 
         scs_vector = outputs['scs']
@@ -576,13 +730,23 @@ class wbt_catchment(QgsProcessingAlgorithm):
 
         # Compute for the Retardance Coefficient x Area
         scs_df['mult_retC-area'] = scs_df['ret-c'] * scs_df['area_has']
-        
-        # Initialize basin_summary list for saving to csv later
-        basin_summary = []
+
+        for index, row in reg_df.iterrows():
+            # Add a new column to `scs_df` for the current Return Period
+            scs_df[f"runC-{row['rp']}-yr"] = scs_df['class_run-c'].map(
+                lambda class_run: runC_df.loc[runC_df['class_run_c'] == class_run, row['rp']].values[0]
+                if not runC_df.loc[runC_df['class_run_c'] == class_run, row['rp']].empty else None)
+            
+            # Convert the runoff coefficient column to numeric
+            scs_df[f"runC-{row['rp']}-yrRP"] = pd.to_numeric(scs_df[f"runC-{row['rp']}-yrRP"], errors='coerce')
+
+            # Compute for the runC x area_has
+            scs_df[f"mult-runC-{row['rp']}-yr"] = scs_df[f"runC-{row['rp']}-yr"] * scs_df['area_has']  
 
         feedback.setCurrentStep(29)
         if feedback.isCanceled():
             return {}
+        
         # Create geometry for WhiteBoxTools
         wbt_subbasin = QgsVectorLayer(outputs['wbt_vector_subbasins']['output'], "wbt_subbasin", 'ogr')
         wbt_dem = QgsRasterLayer(outputs['wbt_watershed']['output'], 'wbt_dem')
@@ -594,6 +758,7 @@ class wbt_catchment(QgsProcessingAlgorithm):
         feedback.setCurrentStep(30)
         if feedback.isCanceled():
             return {}
+        
         # create a vector geometry for each feature in wbt_subbasin layer
         for fet in wbt_subbasin.getFeatures(): 
             # create a temporary vector layer
@@ -645,172 +810,55 @@ class wbt_catchment(QgsProcessingAlgorithm):
 
             # Get the intersected vector layer
             filtered_df = scs_df[scs_df['subbasin-FID'] == subbasinNumber]
-            
-            # get sum of area_has, CN, n_value, and ret-c
+
+            # get sum of area_has, CN, n_value, ret-c, and run-c
             scs_area = filtered_df['area_has'].sum()
             scs_cn = filtered_df['mult_CN-area'].sum()
             scs_nValue = filtered_df['mult_n-area'].sum()
             scs_retC = filtered_df['mult_retC-area'].sum()
-            
+
             # get the weighted CN, n_value, and retardance coefficient
             w_cn = scs_cn / scs_area
             w_nValue = scs_nValue / scs_area
             w_retC = scs_retC / scs_area
 
+            # Save all available variables in the basin_summary dictionary to convert later in a dataframe
+            basin_summary = {
+                'Subbasin'  : subbasinNumber,
+                'Area(has)' : scs_area,
+                'CN'        : w_cn,
+                'n-value'   : w_nValue,
+                'ret-c'     : w_retC,
+                'LP'        : longestFlowPath,
+                'Slope'     : aveSlope
+            }
+
             """
-
-
-            This section determines which method is applicable for the computation of the time of concentration.
-            It will then solves for the appropriate time of concentration. 
-
+            This section computes for the tc for all available methods for each return period
 
             """
-            # Define all global variables needed for each rational method functions
-
-            a, d, b = 1666.19, 7.70 ,-0.65
-            rc = w_retC	
-            c = 0.43
-            n = w_nValue
-            cn = w_cn
-            l, s, area = longestFlowPath * 3.28084, aveSlope/100, scs_area * 0.01
-            _threshold = 10e-10
-
-            # Determine what method should be used
-            def rational_method(slope, area):
-                area_acres = area * 247.105
-                if 3 <= slope <= 10 and 1 <= area_acres <= 112:
-                    return kirpich(a, d, b, l, s, c, area)
-                elif slope > 0 and area_acres < 5:  # Condition for Izzard (1946)
-                    return izzard(a, d, b, rc, l, slope, c, area, _threshold)
-                elif slope > 0 and area_acres > 112:  # Condition for Federal Aviation Admin. (1970)
-                    return faa(a, d, b, rc, l, slope, c, area)
-                elif slope >= 0 and area_acres:  # Condition for Kinematic Wave Formulas
-                    return kinematic(a, d, b, n, l, slope, c, area, _threshold)
-                elif slope <= 2000 and area_acres < 3:  # Condition for SCS Lag Equation (1975)
-                    return scs(a, d, b, cn, l, slope, c, area)
-                else:
-                    return "No applicable method"
-            
-            def kirpich(a, d, b, length, slope, c, area):
-                tc = 0.0078 * length ** 0.77 * slope**-0.385
-                i = a * (tc + d)**b
-                q = 0.278 * c * i * area
-                return q, tc
-
-            def faa(a, d, b, rc, length, slope, c, area):
-                slope = slope * 100
-                tc = (1.8 * (1.1 - rc) * length**0.5) / slope**0.33
-                i = a * (tc + d) **b
-                q = 0.278 * c * i * area
-                return q, tc
-
-            def scs(a, d, b, cn, length, slope, c, area):
-                slope = slope * 100
-                tc = (100 * length** 0.8 * ((1000 / cn)-9)**0.7) / (1900 * slope**0.5)
-                i = a*(tc+d)**b
-                q = 0.278 * c * i * area
-                return q, tc
-            
-            def i_izzard(a, d, b, length, slope, c,i_iter):
-                tc = (41.025 * ((0.0007 * i_iter) + c) * length**0.33) / (slope**(1/3) * i_iter**(2/3))
-                i_calc_mm = a * (tc + d)**b
-                i_calc = i_calc_mm / 10 / 2.54
-                return i_calc , i_iter
-
-            def izzard(a, d, b, rc, length, slope, c, area, _threshold):
-                lower = 0
-                upper = 5000
-                solve = (lower + upper) / 2
-                threshold = i_izzard(solve)[0] - solve  # Compute initial threshold
-                
-                while abs(threshold) >= _threshold:        
-                    if threshold < 0:
-                        upper = solve
-                    elif threshold > 0:
-                        lower = solve
-                    # Update solve based on new bounds
-                    solve = (lower + upper) / 2
-                    # Recompute threshold with updated solve
-                    threshold = i_izzard(solve)[0] - solve
-
-                tc = (41.025 * ((0.0007 * solve) + rc) * length**0.33) / (slope**(1/3) * solve**(2/3))
-                i = a * (tc+d) **b
-                q = 0.278 * c * i * area
-                
-                return q, tc
-
-            def i_kinematic(a, d, b, length, slope, n, i_iter):
-                # Set precision for calculations
-                getcontext().prec = 50  # High precision for critical calculations
-
-                # Convert inputs to Decimal
-                a = Decimal(a)
-                d = Decimal(d)
-                b = Decimal(b)
-                length = Decimal(length)
-                slope = Decimal(slope)
-                n = Decimal(n)
-                i_iter = Decimal(i_iter)
-
-                # Perform calculations
-                tc = (Decimal("0.94") * (length ** Decimal("0.6") * n ** Decimal("0.6"))) / (
-                    i_iter ** Decimal("0.4") * slope ** Decimal("0.33")
-                )
-                i_calc_mm = a * (tc + d) ** b
-                i_calc = i_calc_mm / Decimal("10") / Decimal("2.54")
-                return i_calc, i_iter
-
-            def kinematic(a, d, b, n, length, slope, c, area, _threshold):
-                # Set precision for calculations
-                getcontext().prec = 50
-
-                # Convert inputs to Decimal
-                a = Decimal(a)
-                d = Decimal(d)
-                b = Decimal(b)
-                n = Decimal(n)
-                length = Decimal(length)
-                slope = Decimal(slope)
-                c = Decimal(c)
-                area = Decimal(area)
-                _threshold = Decimal(_threshold)
-
-                lower = Decimal("0")
-                upper = Decimal("1000")
-                solve = (lower + upper) / Decimal("2")
-                threshold = i_kinematic(a, d, b, length, slope, n, solve)[0] - solve
-
-                threshold_plot = []
-                while abs(threshold) >= _threshold:
-                    if threshold < 0:
-                        upper = solve
-                    elif threshold > 0:
-                        lower = solve
-                    solve = (lower + upper) / Decimal("2")
-                    threshold = i_kinematic(a, d, b, length, slope, n, solve)[0] - solve
-                    threshold_plot.append(threshold)
-
-                tc = (Decimal("0.94") * (length ** Decimal("0.6") * n ** Decimal("0.6"))) / (
-                    solve ** Decimal("0.4") * slope ** Decimal("0.33")
-                )
+            # Iterate over the regression coefficient csv file for each return period
+            for index, row in reg_df.iterrows():
+                a, d, b = row['a'], row['d'], row['b'] # Assign the A, d, b values
+                c = filtered_df[f"mult-runC-{row['rp']}-yr"] / area # Computes for the weighted runoff coefficient
+                l = longestFlowPath * 3.28084 # Converts the longest flow path to feet [English metric]
+                s = aveSlope / 100 # Converts the slope (%) to decimal form (#.##)
+                area = scs_area * 0.01 # Converts hectares to sq.km for computation of peak dischage
+                _threshold = 10e-10 # Sets the threshold. This controls the precision of the computed tc
+                tc = time_of_conc(a, d, b, w_retC, w_nValue, w_cn, s, area, l, c, _threshold)
                 i = a * (tc + d) ** b
-                q = Decimal("0.278") * c * i * area
+                q = 0.278 * c * i * area
 
-                return float(q), float(tc)
+                # Saves all available variables in the basin_summary dictionary
+                basin_summary[f"c-{row['rp']}"] = c
+                basin_summary[f"tc-{row['rp']}"] = tc
+                basin_summary[f"Q-{row['rp']}"] = q
 
-            timeConc = rational_method(slope=aveSlope, area= scs_area * 0.01)[1]
-            peakDischarge = rational_method(slope=aveSlope, area= scs_area * 0.01)[0]
-            
-            # save all data to a list and append to basin_summary list
-            subbasin_list = [subbasinNumber, scs_area, w_cn, w_nValue, w_retC, longestFlowPath, aveSlope, timeConc, peakDischarge]
-            basin_summary.append(subbasin_list)
-        
         feedback.setCurrentStep(31)
         if feedback.isCanceled():
             return {}
-        
-        basin_header = ['Subbasin', 'area_has', 'CN', 'n-value', 'ret-c', 'LP', 'slope', 'timeOfConc', 'peakQ'] # Column names
-        basin_df = pd.DataFrame(basin_summary, columns=basin_header, index=None) # save the list as a DataFrame
+
+        basin_df = pd.DataFrame(basin_summary, index=None) # save the list as a DataFrame
         basin_df.to_csv(os.path.join(wbt_file, 'basin_summary.csv')) # save the DataFrame as CSV
 
         return results
