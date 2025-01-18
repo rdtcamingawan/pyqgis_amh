@@ -7,7 +7,7 @@ from qgis.core import QgsProcessingParameterNumber
 from qgis.core import QgsProcessingParameterVectorLayer
 from qgis.core import QgsProcessingParameterVectorDestination
 from qgis.core import QgsProcessingParameterFolderDestination
-from qgis.core import QgsProcessingParameterFileDestination
+from qgis.core import QgsProcessingParameterFile
 from qgis.core import QgsProcessingParameterFeatureSink
 from qgis.core import QgsExpression
 from qgis.core import QgsProcessingUtils
@@ -15,7 +15,6 @@ from qgis.core import QgsVectorLayer
 from qgis.core import QgsRasterLayer
 from qgis.core import QgsWkbTypes
 from qgis.core import QgsFeature
-from decimal import Decimal, getcontext
 import processing
 import os
 import glob
@@ -24,34 +23,34 @@ import pandas as pd
 
 class wbt_catchment(QgsProcessingAlgorithm):
 
-    def kirpich(a, d, b, length, slope, c, area):
+    def kirpich(self,a, d, b, length, slope, c, area):
         tc = 0.0078 * length ** 0.77 * slope**-0.385
         tc = max(tc, 5) # Sets the min. tc to 5mins
         return tc
 
-    def faa(a, d, b, rc, length, slope, c, area):
+    def faa(self,a, d, b, rc, length, slope, c, area):
         slope = slope * 100
         tc = (1.8 * (1.1 - rc) * length**0.5) / slope**0.33
         tc = max(tc, 5) # Sets the min. tc to 5mins
         return tc
 
-    def scs(a, d, b, cn, length, slope, c, area):
+    def scs(self,a, d, b, cn, length, slope, c, area):
         slope = slope * 100
         tc = (100 * length** 0.8 * ((1000 / cn)-9)**0.7) / (1900 * slope**0.5)
         tc = max(tc, 5) # Sets the min. tc to 5mins
         return tc
     
-    def i_izzard(a, d, b, length, slope, c,i_iter):
+    def i_izzard(self,a, d, b, length, slope, c,i_iter):
         tc = (41.025 * ((0.0007 * i_iter) + c) * length**0.33) / (slope**(1/3) * i_iter**(2/3))
         i_calc_mm = a * (tc + d)**b
         i_calc = i_calc_mm / 10 / 2.54
         return i_calc , i_iter
 
-    def izzard(a, d, b, rc, length, slope, c, area, _threshold):
+    def izzard(self,a, d, b, rc, length, slope, c, area, _threshold):
         lower = 0
         upper = 5000
         solve = (lower + upper) / 2
-        threshold = i_izzard(solve)[0] - solve  # Compute initial threshold
+        threshold = self.i_izzard(solve)[0] - solve  # Compute initial threshold
         
         while abs(threshold) >= _threshold:        
             if threshold < 0:
@@ -61,52 +60,24 @@ class wbt_catchment(QgsProcessingAlgorithm):
             # Update solve based on new bounds
             solve = (lower + upper) / 2
             # Recompute threshold with updated solve
-            threshold = i_izzard(solve)[0] - solve
+            threshold = self.i_izzard(solve)[0] - solve
 
         tc = (41.025 * ((0.0007 * solve) + rc) * length**0.33) / (slope**(1/3) * solve**(2/3))
         tc = max(tc, 5) # Sets the min. tc to 5mins
         return tc
 
-    def i_kinematic(a, d, b, length, slope, n, i_iter):
-        # Set precision for calculations
-        getcontext().prec = 50  # High precision for critical calculations
-
-        # Convert inputs to Decimal
-        a = Decimal(a)
-        d = Decimal(d)
-        b = Decimal(b)
-        length = Decimal(length)
-        slope = Decimal(slope)
-        n = Decimal(n)
-        i_iter = Decimal(i_iter)
-
+    def i_kinematic(self,a, d, b, length, slope, n, i_iter):
         # Perform calculations
-        tc = (Decimal("0.94") * (length ** Decimal("0.6") * n ** Decimal("0.6"))) / (
-            i_iter ** Decimal("0.4") * slope ** Decimal("0.33")
-        )
+        tc = (0.94 * (length ** 0.6 * n ** 0.6)) / ( i_iter ** 0.4 * slope ** 0.33)
         i_calc_mm = a * (tc + d) ** b
-        i_calc = i_calc_mm / Decimal("10") / Decimal("2.54")
+        i_calc = i_calc_mm / 10 / 2.54
         return i_calc, i_iter
 
-    def kinematic(a, d, b, n, length, slope, c, area, _threshold):
-        # Set precision for calculations
-        getcontext().prec = 50
-
-        # Convert inputs to Decimal
-        a = Decimal(a)
-        d = Decimal(d)
-        b = Decimal(b)
-        n = Decimal(n)
-        length = Decimal(length)
-        slope = Decimal(slope)
-        c = Decimal(c)
-        area = Decimal(area)
-        _threshold = Decimal(_threshold)
-
-        lower = Decimal("0")
-        upper = Decimal("1000")
-        solve = (lower + upper) / Decimal("2")
-        threshold = i_kinematic(a, d, b, length, slope, n, solve)[0] - solve
+    def kinematic(self,a, d, b, n, length, slope, c, area, _threshold):
+        lower = 0
+        upper = 1000
+        solve = (lower + upper) / 2
+        threshold = self.i_kinematic(a, d, b, length, slope, n, solve)[0] - solve
 
         threshold_plot = []
         while abs(threshold) >= _threshold:
@@ -114,16 +85,15 @@ class wbt_catchment(QgsProcessingAlgorithm):
                 upper = solve
             elif threshold > 0:
                 lower = solve
-            solve = (lower + upper) / Decimal("2")
-            threshold = i_kinematic(a, d, b, length, slope, n, solve)[0] - solve
+            solve = (lower + upper) / 2
+            threshold = self.i_kinematic(a, d, b, length, slope, n, solve)[0] - solve
             threshold_plot.append(threshold)
 
-        tc = (Decimal("0.94") * (length ** Decimal("0.6") * n ** Decimal("0.6"))) / (
-            solve ** Decimal("0.4") * slope ** Decimal("0.33"))
+        tc = (0.94 * (length ** 0.6 * n ** 0.6)) / (solve ** 0.4 * slope ** 0.33)
         tc = max(tc, 5) # Sets the min. tc to 5mins
-        return float(tc)
+        return tc
     
-    def time_of_conc(a, d, b, rc, n, cn, slope, area, l, c, _threshold):
+    def time_of_conc(self,a, d, b, rc, n, cn, slope, area, l, c, _threshold):
         # Determine what applicable method should be used for tc
         # Append the applicable tc to tc_list
         # Return the max tc
@@ -132,26 +102,26 @@ class wbt_catchment(QgsProcessingAlgorithm):
         area_acres = area * 247.105 # converts
         
         if 3 <= slope <= 10 and 1 <= area_acres <= 112:
-            tc_list.append(kirpich(a, d, b, l, slope, c, area))
+            tc_list.append(self.kirpich(a, d, b, l, slope, c, area))
         
         if slope > 0 and area_acres < 5:  # Condition for Izzard (1946)
-            tc_list.append(izzard(a, d, b, rc, l, slope, c, area, _threshold))
+            tc_list.append(self.izzard(a, d, b, rc, l, slope, c, area, _threshold))
         
         if slope > 0 and area_acres > 112:  # Condition for Federal Aviation Admin. (1970)
-            tc_list.append(faa(a, d, b, rc, l, slope, c, area))
+            tc_list.append(self.faa(a, d, b, rc, l, slope, c, area))
         
         if slope >= 0 and area_acres:  # Condition for Kinematic Wave Formulas
-            tc_list.append(kinematic(a, d, b, n, l, slope, c, area, _threshold))
+            tc_list.append(self.kinematic(a, d, b, n, l, slope, c, area, _threshold))
         
         if slope <= 2000 and area_acres < 3:  # Condition for SCS Lag Equation (1975)
-            tc_list.append(scs(a, d, b, cn, l, slope, c, area))
+            tc_list.append(self.scs(a, d, b, cn, l, slope, c, area))
         
         else:
             tc_list.append(0) # If there are no applicable method this function will return tc=0
         
         return max(tc_list) 
     
-    def runoff_df():
+    def runoff_df(self):
         data_runoff_c = {
                 'class_run_c': ['AS', 'CN', 'GPF', 'GPA', 'GPS', 'GFF', 'GFA', 'GFS', 'GGF', 'GGA', 'GGS', 'CLF', 'CLA', 'CLS',
                     'PRF', 'PRA', 'PRS', 'FWF', 'FWA', 'FWS'],
@@ -175,7 +145,7 @@ class wbt_catchment(QgsProcessingAlgorithm):
         self.addParameter(QgsProcessingParameterVectorLayer('land_cover', 'Land Cover', types=[QgsProcessing.TypeVectorPolygon], defaultValue=None))
         self.addParameter(QgsProcessingParameterVectorLayer('soil_type', 'Soil Type', types=[QgsProcessing.TypeVectorPolygon], defaultValue=None))
         self.addParameter(QgsProcessingParameterFolderDestination('temp_folder', 'Save Folder')) # Destination Temp Folder for WBT ouptuts
-        self.addParameter(QgsProcessingParameterFileDestination('reg_csv', 'Regression CSV'))
+        self.addParameter(QgsProcessingParameterFile('reg_csv', 'Regression CSV'))
         
     def processAlgorithm(self, parameters, context, model_feedback):
         # Use a multi-step feedback, so that individual child algorithm progress reports are adjusted for the
@@ -706,7 +676,7 @@ class wbt_catchment(QgsProcessingAlgorithm):
         reg_df = pd.read_csv(parameters['reg_csv'])
 
         # Call the run-off coefficient Dataframe
-        runC_df = runoff_df()
+        runC_df = self.runoff_df()
         
         # Create a Vector Layer for outputs['scs'] 
         scs_vector = outputs['scs']
@@ -738,7 +708,7 @@ class wbt_catchment(QgsProcessingAlgorithm):
                 if not runC_df.loc[runC_df['class_run_c'] == class_run, row['rp']].empty else None)
             
             # Convert the runoff coefficient column to numeric
-            scs_df[f"runC-{row['rp']}-yrRP"] = pd.to_numeric(scs_df[f"runC-{row['rp']}-yrRP"], errors='coerce')
+            scs_df[f"runC-{row['rp']}-yr"] = pd.to_numeric(scs_df[f"runC-{row['rp']}-yr"], errors='coerce')
 
             # Compute for the runC x area_has
             scs_df[f"mult-runC-{row['rp']}-yr"] = scs_df[f"runC-{row['rp']}-yr"] * scs_df['area_has']  
@@ -840,12 +810,12 @@ class wbt_catchment(QgsProcessingAlgorithm):
             # Iterate over the regression coefficient csv file for each return period
             for index, row in reg_df.iterrows():
                 a, d, b = row['a'], row['d'], row['b'] # Assign the A, d, b values
-                c = filtered_df[f"mult-runC-{row['rp']}-yr"] / area # Computes for the weighted runoff coefficient
+                c = filtered_df[f"mult-runC-{row['rp']}-yr"] / scs_area # Computes for the weighted runoff coefficient
                 l = longestFlowPath * 3.28084 # Converts the longest flow path to feet [English metric]
                 s = aveSlope / 100 # Converts the slope (%) to decimal form (#.##)
                 area = scs_area * 0.01 # Converts hectares to sq.km for computation of peak dischage
                 _threshold = 10e-10 # Sets the threshold. This controls the precision of the computed tc
-                tc = time_of_conc(a, d, b, w_retC, w_nValue, w_cn, s, area, l, c, _threshold)
+                tc = self.time_of_conc(a, d, b, w_retC, w_nValue, w_cn, s, area, l, c, _threshold)
                 i = a * (tc + d) ** b
                 q = 0.278 * c * i * area
 
