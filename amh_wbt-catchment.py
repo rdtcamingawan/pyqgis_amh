@@ -153,6 +153,7 @@ class wbt_catchment(QgsProcessingAlgorithm):
         feedback = QgsProcessingMultiStepFeedback(31, model_feedback)
         results = {}
         outputs = {}
+        basin_summary = []
         wbt_file = parameters['temp_folder']
 
         feedback.setCurrentStep(1)
@@ -668,10 +669,7 @@ class wbt_catchment(QgsProcessingAlgorithm):
         feedback.setCurrentStep(28)
         if feedback.isCanceled():
             return {}
-        
-        # Initialize the column header names for the basin summary
-        basin_header = ['Subbasin', 'area_has', 'CN', 'n-value', 'ret-c', 'LP', 'slope'] # Column names for the Basin summary
-        
+                
         # Create a Pandas DataFrame for the user input regression coefficient csv
         reg_df = pd.read_csv(parameters['reg_csv'])
 
@@ -778,57 +776,50 @@ class wbt_catchment(QgsProcessingAlgorithm):
             longestFlowPath = df_LP.loc[longestFlowPathPosition, 'LENGTH']
             aveSlope = df_LP.loc[longestFlowPathPosition, 'AVG_SLOPE']
 
+            """
+            INSIDE FILTERED DATAFRAME
+            """
             # Get the intersected vector layer
             filtered_df = scs_df[scs_df['subbasin-FID'] == subbasinNumber]
 
             # get sum of area_has, CN, n_value, ret-c, and run-c
             scs_area = filtered_df['area_has'].sum()
-            scs_cn = filtered_df['mult_CN-area'].sum()
-            scs_nValue = filtered_df['mult_n-area'].sum()
-            scs_retC = filtered_df['mult_retC-area'].sum()
+            w_cn = filtered_df['mult_CN-area'].sum() / scs_area # weighted
+            w_nValue = filtered_df['mult_n-area'].sum() / scs_area # weighted
+            w_retC = filtered_df['mult_retC-area'].sum() / scs_area # weighted
 
-            # get the weighted CN, n_value, and retardance coefficient
-            w_cn = scs_cn / scs_area
-            w_nValue = scs_nValue / scs_area
-            w_retC = scs_retC / scs_area
+            
+            # --------------- This section computes for the tc for all available methods for each return period --------------- 
 
-            # Save all available variables in the basin_summary dictionary to convert later in a dataframe
-            basin_summary = {
-                'Subbasin'  : subbasinNumber,
-                'Area(has)' : scs_area,
-                'CN'        : w_cn,
-                'n-value'   : w_nValue,
-                'ret-c'     : w_retC,
-                'LP'        : longestFlowPath,
-                'Slope'     : aveSlope
-            }
-
-            """
-            This section computes for the tc for all available methods for each return period
-
-            """
             # Iterate over the regression coefficient csv file for each return period
             for index, row in reg_df.iterrows():
                 a, d, b = row['a'], row['d'], row['b'] # Assign the A, d, b values
-                c = filtered_df[f"mult-runC-{row['rp']}-yr"] / scs_area # Computes for the weighted runoff coefficient
+                c = filtered_df[f"mult-runC-{row['rp']}-yr"].sum() / scs_area # Computes for the weighted runoff coefficient
                 l = longestFlowPath * 3.28084 # Converts the longest flow path to feet [English metric]
                 s = aveSlope / 100 # Converts the slope (%) to decimal form (#.##)
                 area = scs_area * 0.01 # Converts hectares to sq.km for computation of peak dischage
                 _threshold = 10e-10 # Sets the threshold. This controls the precision of the computed tc
                 tc = self.time_of_conc(a, d, b, w_retC, w_nValue, w_cn, s, area, l, c, _threshold)
+                feedback.pushInfo(f"type: {type(tc)} | tc= {tc}")
                 i = a * (tc + d) ** b
                 q = 0.278 * c * i * area
 
-                # Saves all available variables in the basin_summary dictionary
-                basin_summary[f"c-{row['rp']}"] = c
-                basin_summary[f"tc-{row['rp']}"] = tc
-                basin_summary[f"Q-{row['rp']}"] = q
+                # Store all available variables in the subbasin_list
+                subbasin_list = [subbasinNumber, scs_area, w_cn, w_nValue, w_retC, longestFlowPath, aveSlope, row['rp'], c, tc, q]
+
+                # Append subbasin_list to basin_summary
+                basin_summary.append(subbasin_list)
+                
+    
 
         feedback.setCurrentStep(31)
         if feedback.isCanceled():
             return {}
+                
+        # Initialize the column header names for the basin summary
+        basin_header = ['Subbasin', 'area_has', 'CN', 'n-value', 'ret-c', 'flowPath', 'slope', 'RP', 'runoff-C', 'tc', 'Q'] # Column names for the Basin summary
 
-        basin_df = pd.DataFrame(basin_summary, index=None) # save the list as a DataFrame
+        basin_df = pd.DataFrame(basin_summary, columns=basin_header, index=None) # save the list as a DataFrame
         basin_df.to_csv(os.path.join(wbt_file, 'basin_summary.csv')) # save the DataFrame as CSV
 
         return results
