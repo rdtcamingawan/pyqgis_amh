@@ -833,6 +833,26 @@ class wbt_catchment(QgsProcessingAlgorithm):
 
     def groupId(self):
         return ''
+    
+    def shortHelpString(self) -> str:
+        html_content = """
+            <!DOCTYPE html>
+            <html lang="en">
+            <head>
+                <meta charset="UTF-8">
+                <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                <title>Sample HTML</title>
+                <style>
+                </style>
+            </head>
+            <body>
+                <h1>Welcome to Sample HTML</h1>
+                <p>This is a basic example of an HTML document embedded in Python. You can use this as a template and modify it as needed.</p>
+                <p>Visit <a href="https://example.com">example.com</a> for more information.</p>
+            </body>
+            </html>
+            """
+        return html_content
 
     def createInstance(self):
         return wbt_catchment()
