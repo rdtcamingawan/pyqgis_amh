@@ -23,34 +23,33 @@ import pandas as pd
 
 class wbt_catchment(QgsProcessingAlgorithm):
 
-    def kirpich(self,a, d, b, length, slope, c, area):
+    def kirpich(self, length, slope):
         tc = 0.0078 * length ** 0.77 * slope**-0.385
-        tc = max(tc, 5) # Sets the min. tc to 5mins
-        return tc
+        return max(tc, 5) # Sets the min. tc to 5mins
 
-    def faa(self,a, d, b, rc, length, slope, c, area):
+    def faa(self,length, slope, c):
         slope = slope * 100
-        tc = (1.8 * (1.1 - rc) * length**0.5) / slope**0.33
+        tc = (1.8 * (1.1 - c) * length**0.5) / slope**0.33
         tc = max(tc, 5) # Sets the min. tc to 5mins
-        return tc
+        return max(tc, 5) # Sets the min. tc to 5mins
 
-    def scs(self,a, d, b, cn, length, slope, c, area):
+    def scs(self, cn, length, slope):
         slope = slope * 100
         tc = (100 * length** 0.8 * ((1000 / cn)-9)**0.7) / (1900 * slope**0.5)
         tc = max(tc, 5) # Sets the min. tc to 5mins
-        return tc
+        return max(tc, 5) # Sets the min. tc to 5mins
     
-    def i_izzard(self,a, d, b, length, slope, c,i_iter):
+    def i_izzard(self, a, d , b, length, slope, i_iter):
         tc = (41.025 * ((0.0007 * i_iter) + c) * length**0.33) / (slope**(1/3) * i_iter**(2/3))
         i_calc_mm = a * (tc + d)**b
         i_calc = i_calc_mm / 10 / 2.54
         return i_calc , i_iter
 
-    def izzard(self,a, d, b, rc, length, slope, c, area, _threshold):
+    def izzard(self, a, d , b, rc, length, slope, _threshold):
         lower = 0
         upper = 5000
         solve = (lower + upper) / 2
-        threshold = self.i_izzard(solve)[0] - solve  # Compute initial threshold
+        threshold = self.i_izzard(a, d , b, length, slope, solve)[0] - solve  # Compute initial threshold
         
         while abs(threshold) >= _threshold:        
             if threshold < 0:
@@ -60,20 +59,19 @@ class wbt_catchment(QgsProcessingAlgorithm):
             # Update solve based on new bounds
             solve = (lower + upper) / 2
             # Recompute threshold with updated solve
-            threshold = self.i_izzard(solve)[0] - solve
+            threshold = self.i_izzard(a, d , b, length, slope, solve)[0] - solve
 
         tc = (41.025 * ((0.0007 * solve) + rc) * length**0.33) / (slope**(1/3) * solve**(2/3))
-        tc = max(tc, 5) # Sets the min. tc to 5mins
-        return tc
+        return max(tc, 5) # Sets the min. tc to 5mins
 
-    def i_kinematic(self,a, d, b, length, slope, n, i_iter):
+    def i_kinematic(self, a, d, b, length, slope, n, i_iter):
         # Perform calculations
         tc = (0.94 * (length ** 0.6 * n ** 0.6)) / ( i_iter ** 0.4 * slope ** 0.33)
         i_calc_mm = a * (tc + d) ** b
         i_calc = i_calc_mm / 10 / 2.54
         return i_calc, i_iter
 
-    def kinematic(self,a, d, b, n, length, slope, c, area, _threshold):
+    def kinematic(self, a, d, b,  n, length, slope, _threshold):
         lower = 0
         upper = 1000
         solve = (lower + upper) / 2
@@ -91,7 +89,7 @@ class wbt_catchment(QgsProcessingAlgorithm):
 
         tc = (0.94 * (length ** 0.6 * n ** 0.6)) / (solve ** 0.4 * slope ** 0.33)
         tc = max(tc, 5) # Sets the min. tc to 5mins
-        return tc
+        return max(tc, 5) # Sets the min. tc to 5mins
     
     def time_of_conc(self,a, d, b, rc, n, cn, slope, area, l, c, _threshold):
         # Determine what applicable method should be used for tc
@@ -102,19 +100,19 @@ class wbt_catchment(QgsProcessingAlgorithm):
         area_acres = area * 247.105 # converts
         
         if 3 <= slope <= 10 and 1 <= area_acres <= 112:
-            tc_list.append(self.kirpich(a, d, b, l, slope, c, area))
+            tc_list.append(self.kirpich(length=l, slope=slope))
         
         if slope > 0 and area_acres < 5:  # Condition for Izzard (1946)
-            tc_list.append(self.izzard(a, d, b, rc, l, slope, c, area, _threshold))
+            tc_list.append(self.izzard(a, d, b, rc, l, slope, _threshold))
         
         if slope > 0 and area_acres > 112:  # Condition for Federal Aviation Admin. (1970)
-            tc_list.append(self.faa(a, d, b, rc, l, slope, c, area))
+            tc_list.append(self.faa(l, slope, c))
         
         if slope >= 0 and area_acres:  # Condition for Kinematic Wave Formulas
-            tc_list.append(self.kinematic(a, d, b, n, l, slope, c, area, _threshold))
+            tc_list.append(self.kinematic(a, d, b, n, l, slope, _threshold))
         
         if slope <= 2000 and area_acres < 3:  # Condition for SCS Lag Equation (1975)
-            tc_list.append(self.scs(a, d, b, cn, l, slope, c, area))
+            tc_list.append(self.scs(cn, l, slope))
         
         else:
             tc_list.append(0) # If there are no applicable method this function will return tc=0
