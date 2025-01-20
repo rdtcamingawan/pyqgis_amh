@@ -39,8 +39,8 @@ class wbt_catchment(QgsProcessingAlgorithm):
         tc = max(tc, 5) # Sets the min. tc to 5mins
         return max(tc, 5) # Sets the min. tc to 5mins
     
-    def i_izzard(self, a, d , b, length, slope, i_iter):
-        tc = (41.025 * ((0.0007 * i_iter) + c) * length**0.33) / (slope**(1/3) * i_iter**(2/3))
+    def i_izzard(self, a, d , b, rc, length, slope, i_iter):
+        tc = (41.025 * ((0.0007 * i_iter) + rc) * length**0.33) / (slope**(1/3) * i_iter**(2/3))
         i_calc_mm = a * (tc + d)**b
         i_calc = i_calc_mm / 10 / 2.54
         return i_calc , i_iter
@@ -49,7 +49,7 @@ class wbt_catchment(QgsProcessingAlgorithm):
         lower = 0
         upper = 5000
         solve = (lower + upper) / 2
-        threshold = self.i_izzard(a, d , b, length, slope, solve)[0] - solve  # Compute initial threshold
+        threshold = self.i_izzard(a, d , b, rc, length, slope, solve)[0] - solve  # Compute initial threshold
         
         while abs(threshold) >= _threshold:        
             if threshold < 0:
@@ -59,7 +59,7 @@ class wbt_catchment(QgsProcessingAlgorithm):
             # Update solve based on new bounds
             solve = (lower + upper) / 2
             # Recompute threshold with updated solve
-            threshold = self.i_izzard(a, d , b, length, slope, solve)[0] - solve
+            threshold = self.i_izzard(a, d , b, rc, length, slope, solve)[0] - solve
 
         tc = (41.025 * ((0.0007 * solve) + rc) * length**0.33) / (slope**(1/3) * solve**(2/3))
         return max(tc, 5) # Sets the min. tc to 5mins
@@ -834,25 +834,44 @@ class wbt_catchment(QgsProcessingAlgorithm):
     def groupId(self):
         return ''
     
-    def shortHelpString(self) -> str:
-        html_content = """
-            <!DOCTYPE html>
-            <html lang="en">
-            <head>
-                <meta charset="UTF-8">
-                <meta name="viewport" content="width=device-width, initial-scale=1.0">
-                <title>Sample HTML</title>
-                <style>
-                </style>
-            </head>
-            <body>
-                <h1>Welcome to Sample HTML</h1>
-                <p>This is a basic example of an HTML document embedded in Python. You can use this as a template and modify it as needed.</p>
-                <p>Visit <a href="https://example.com">example.com</a> for more information.</p>
-            </body>
-            </html>
-            """
-        return html_content
+    def shortHelpString(self):
+        return """
+        <h1>Catchment Delineation and Discharge Calculator (wbt_catchment)</h1>
+        <p>
+            This tool delineates watersheds and subbasins using WhiteBoxTools and calculates hydrological parameters 
+            such as time of concentration (tc) using multiple methods (Kirpich, Izzard, Faa, SCS, Kinematic). 
+            It integrates DEM, land cover, soil type, and outfall data to compute runoff coefficients and peak discharge 
+            based on user-provided regression coefficients.
+        </p>
+        
+        <h2>Inputs:</h2>
+        <ul>
+            <li><b>- CRS</b>: Coordinate Reference System.</li>
+            <li><b>- DEM</b>: Digital Elevation Model raster layer.</li>
+            <li><b>- Minimum Area</b>: Minimum area threshold for watershed delineation (e.g., 50000).</li>
+            <li><b>- Outfall</b>: Vector point layer indicating outfall location.</li>
+            <li><b>- Land Cover</b>: Vector polygon layer representing land cover (e.g. Geoportal Land Cover).</li>
+            <li><b>- Soil Type</b>: Vector polygon layer representing soil types (BWSM Soil Type from Geoportal).</li>
+            <li><b>- Save Folder</b>: Destination folder for outputs.</li>
+            <li><b>- Regression CSV</b>: CSV file containing regression coefficients for different return periods.</li>
+        </ul>
+        
+        <h2>Outputs:</h2>
+        <ul>
+            <li><b>Basin Summary.csv</b>: CSV file summarizing basin characteristics and peak discharges at different return periods using rational method.</li>
+        </ul>
+        
+        <h2>Process Overview:</h2>
+        <ol>
+            <li>1. Reprojects input layers to the specified CRS.</li>
+            <li>2. Fills DEM depressions and calculates flow accumulation.</li>
+            <li>3. Extracts stream networks and delineates watersheds and subbasins.</li>
+            <li>4. Intersects land cover and soil data with subbasins.</li>
+            <li>5. Calculates runoff coefficients and time of concentration using various hydrological methods.</li>
+            <li>6. Compiles results into a summary CSV.</li>
+        </ol>
+        """
+
 
     def createInstance(self):
         return wbt_catchment()
