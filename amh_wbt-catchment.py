@@ -858,7 +858,7 @@ class wbt_catchment(QgsProcessingAlgorithm):
         
         <h2>Outputs:</h2>
         <ul>
-            <li><b>Basin Summary.csv</b>: CSV file summarizing basin characteristics and peak discharges at different return periods using rational method.</li>
+            <li><b>Basin Summary</b>: CSV file summarizing basin characteristics and peak discharges at different return periods using rational method.</li>
         </ul>
         
         <h2>Process Overview:</h2>
