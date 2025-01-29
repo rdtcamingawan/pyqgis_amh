@@ -16,7 +16,7 @@ output_dir = r"C:\Users\richmond\AMH Philippines, Inc\PP23.307 Rockwell and Roll
 
 # Fixed parameters
 PT1_ELEV = 39.5             # Fixed spillway elevation
-PT2_RANGE = np.arange(39.5, 40.6, 0.01)  # 39.5 to 40.5 inclusive
+PT2_RANGE = np.arange(40, 43, 0.01)  # 39.5 to 40.5 inclusive
 
 def process_elevation(pt2_elev):
     """Process single elevation scenario"""
@@ -34,7 +34,7 @@ def process_elevation(pt2_elev):
         # Load geometries
         pt1 = gpd.read_file(pt1_shp)
         poly1 = gpd.read_file(poly1_shp)
-        poly2 = gpd.read_file(poly2_shp)
+        # poly2 = gpd.read_file(poly2_shp)
 
         # Create masks
         def create_mask(poly):
@@ -47,7 +47,7 @@ def process_elevation(pt2_elev):
             ).astype(bool)
         
         mask_slope = create_mask(poly1)
-        mask_flat = create_mask(poly2)
+        # mask_flat = create_mask(poly2)
 
         # Get coordinates grid
         rows, cols = elev.shape
@@ -74,8 +74,8 @@ def process_elevation(pt2_elev):
             elev = np.where((mask_slope & (elev < slope_surface)), slope_surface, elev)
 
         # Process flat area (poly2)
-        if np.any(mask_flat):
-            elev = np.where((mask_flat & (elev < pt2_elev)), pt2_elev, elev)
+        # if np.any(mask_flat):
+        #     elev = np.where((mask_flat & (elev < pt2_elev)), pt2_elev, elev)
 
         # Save output
         output_path = os.path.join(output_dir, 'dp',f"elev_{pt2_elev:.2f}m.tif")
