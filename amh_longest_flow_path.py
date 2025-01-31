@@ -13,7 +13,7 @@ from qgis.core import QgsProcessingUtils
 from qgis.core import QgsFeatureSink
 from qgis.core import QgsWkbTypes
 from qgis.core import QgsVectorLayer
-from qgis.core import QgsFeatue
+from qgis.core import QgsFeature
 import processing
 import os
 import pandas as pd
@@ -486,11 +486,11 @@ class generate_cn(QgsProcessingAlgorithm):
             # Append subbasin_list to basin_summary
             basin_summary.append(subbasin_list)
 
-    # Initialize the column header names for the basin summary
-    basin_header = ['Subbasin', 'area_has', 'CN', 'n-value', 'flowPath', 'slope', 'lag time'] # Column names for the Basin summary
+        # Initialize the column header names for the basin summary
+        basin_header = ['Subbasin', 'area_has', 'CN', 'n-value', 'flowPath', 'slope', 'lag time'] # Column names for the Basin summary
 
-    basin_df = pd.DataFrame(basin_summary, columns=basin_header, index=None) # save the list as a DataFrame
-    basin_df.to_csv(os.path.join(wbt_file, 'basin_summary.csv')) # save the DataFrame as CSV
+        basin_df = pd.DataFrame(basin_summary, columns=basin_header, index=None) # save the list as a DataFrame
+        basin_df.to_csv(os.path.join(wbt_file, 'basin_summary.csv')) # save the DataFrame as CSV
 
             
             
