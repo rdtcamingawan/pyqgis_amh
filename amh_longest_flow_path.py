@@ -477,17 +477,17 @@ class generate_cn(QgsProcessingAlgorithm):
             w_nValue = filtered_df['mult_n-area'].sum() / scs_area # weighted
 
             #Compute for the Lag Time
-            tc = (60 * (longestFlowPath * 3.28084)** 0.8 * ((1000 / (w_cn)))-9)**0.7) / (1900 * slope**0.5)
+            tc = (60 * ((longestFlowPath * 3.28084) ** 0.8) * ((1000 / w_cn) - 9) ** 0.7) / (1900 * (aveSlope ** 0.5))
             lag_time = max(tc, 5) # Sets the min. tc to 5mins
 
             # Store all available variables in the subbasin_list
-            subbasin_list = [subbasinNumber, scs_area, w_cn, w_nValue, w_retC, longestFlowPath, aveSlope, row['rp'], c, tc, q]
+            subbasin_list = [subbasinNumber, scs_area, w_cn, w_nValue, longestFlowPath, aveSlope, lag_time]
 
             # Append subbasin_list to basin_summary
             basin_summary.append(subbasin_list)
 
     # Initialize the column header names for the basin summary
-    basin_header = ['Subbasin', 'area_has', 'CN', 'n-value', 'ret-c', 'flowPath', 'slope', 'RP', 'runoff-C', 'tc', 'Q'] # Column names for the Basin summary
+    basin_header = ['Subbasin', 'area_has', 'CN', 'n-value', 'flowPath', 'slope', 'lag time'] # Column names for the Basin summary
 
     basin_df = pd.DataFrame(basin_summary, columns=basin_header, index=None) # save the list as a DataFrame
     basin_df.to_csv(os.path.join(wbt_file, 'basin_summary.csv')) # save the DataFrame as CSV
