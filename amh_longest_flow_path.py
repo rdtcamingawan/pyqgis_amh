@@ -13,13 +13,13 @@ from qgis.core import QgsProcessingUtils
 from qgis.core import QgsFeatureSink
 from qgis.core import QgsWkbTypes
 from qgis.core import QgsVectorLayer
-from qgis.core import QgsFeature
+from qgis.core import QgsFeature, QgsRasterLayer
 import processing
 import os
 import pandas as pd
 
 
-class generate_cn(QgsProcessingAlgorithm):
+class scs_lag(QgsProcessingAlgorithm):
 
     def initAlgorithm(self, config=None):
         # Inputs
@@ -30,7 +30,7 @@ class generate_cn(QgsProcessingAlgorithm):
         self.addParameter(QgsProcessingParameterVectorLayer('land_cover', 'Land Cover', types=[QgsProcessing.TypeVectorPolygon], defaultValue=None))
         self.addParameter(QgsProcessingParameterVectorLayer('soil_type', 'Soil Type', types=[QgsProcessing.TypeVectorPolygon], defaultValue=None))
         # Outputs
-        self.addParameter(QgsProcessingParameterFeatureSink('curve_number', 'Curve Number', type=QgsProcessing.TypeVectorAnyGeometry, createByDefault=True, defaultValue=None))
+        # self.addParameter(QgsProcessingParameterFeatureSink('curve_number', 'Curve Number', type=QgsProcessing.TypeVectorAnyGeometry, createByDefault=True, defaultValue=None))
 
 
     def processAlgorithm(self, parameters, context, model_feedback):
@@ -364,34 +364,36 @@ class generate_cn(QgsProcessingAlgorithm):
             'FORMULA':'$area * 0.0001',
             'OUTPUT':'TEMPORARY_OUTPUT'
             }
-        outputs['scs'] = processing.run("native:fieldcalculator", alg_params, context=context, feedback=feedback, is_child_algorithm=True)['OUTPUT']
+        outputs['scs'] = processing.run("native:fieldcalculator", alg_params, context=context, feedback=feedback)['OUTPUT']
 
-        # Write to the final output
-        (sink, dest_id) = self.parameterAsSink(
-            parameters,
-            'curve_number',
-            context,
-            context.getMapLayer(outputs['scs']).fields(),
-            context.getMapLayer(outputs['scs']).wkbType(),
-            context.getMapLayer(outputs['scs']).sourceCrs()
-        )
+        # # Write to the final output
+        # (sink, dest_id) = self.parameterAsSink(
+        #     parameters,
+        #     'curve_number',
+        #     context,
+        #     context.getMapLayer(outputs['scs']).fields(),
+        #     context.getMapLayer(outputs['scs']).wkbType(),
+        #     context.getMapLayer(outputs['scs']).sourceCrs()
+        # )
 
-        features = context.getMapLayer(outputs['scs']).getFeatures()
-        total = 100.0 / context.getMapLayer(outputs['scs']).featureCount() if context.getMapLayer(outputs['scs']).featureCount() else 0
+        # features = context.getMapLayer(outputs['scs']).getFeatures()
+        # total = 100.0 / context.getMapLayer(outputs['scs']).featureCount() if context.getMapLayer(outputs['scs']).featureCount() else 0
 
-        for current, feature in enumerate(features):
-            if feedback.isCanceled():
-                break
-            sink.addFeature(feature, QgsFeatureSink.FastInsert)
-            feedback.setProgress(int(current * total))
+        # for current, feature in enumerate(features):
+        #     if feedback.isCanceled():
+        #         break
+        #     sink.addFeature(feature, QgsFeatureSink.FastInsert)
+        #     feedback.setProgress(int(current * total))
 
-        results['curve_number'] = dest_id
+        # results['curve_number'] = dest_id
 
         # Initialize pandas DataFrame -*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-
 
         # Create a Vector Layer for outputs['scs'] 
         scs_vector = outputs['scs']
+        feedback.pushInfo(f'{type(scs_vector)}')
         scs_fields = [f.name() for f in scs_vector.fields()] # Pandas column header
+        feedback.pushInfo(f'{scs_fields}')
         scs_attrib = [f.attributes() for f in scs_vector.getFeatures()] # Pandas data
 
         # Save all scs_vector attributes to a Pandas DataFrame
@@ -409,9 +411,9 @@ class generate_cn(QgsProcessingAlgorithm):
         scs_df['mult_n-area'] = scs_df['n_value'] * scs_df['area_has']
 
         # WhiteBoxTools Portion --------------------------------------
-        wbt_subbasin = outputs['fixed_subbasins']['OUTPUT']
-        wbt_dem = parameters['wbt_dem']
-        wbt_filled_dem = parameters['wbt_filled']
+        wbt_subbasin = QgsVectorLayer(outputs['fixed_subbasins']['OUTPUT'], 'wbt_subbasin', 'ogr')
+        wbt_dem = QgsRasterLayer(parameters['wbt_dem'], 'wbt_subbasin')
+        wbt_filled_dem = QgsRasterLayer(parameters['wbt_filled'], 'wbt_subbasin')
 
         # Get geometry type of wbt_subbasin and display as a string
         geometry_type_str = QgsWkbTypes.displayString(wbt_subbasin.wkbType())
@@ -497,16 +499,54 @@ class generate_cn(QgsProcessingAlgorithm):
         return results 
 
     def name(self):
-        return 'generate_cn'
+        return 'scs_lag'
 
     def displayName(self):
-        return 'generate_cn'
+        return 'scs_lag'
 
     def group(self):
         return ''
 
     def groupId(self):
         return ''
+    
+    def shortHelpString(self):
+        return """
+        <h1>SCS Lag Calculator</h1>
+        <p>
+            This tool delineates watersheds and subbasins using WhiteBoxTools and calculates hydrological parameters 
+            such as time of concentration (tc) using multiple methods (Kirpich, Izzard, Faa, SCS, Kinematic). 
+            It integrates DEM, land cover, soil type, and outfall data to compute runoff coefficients and peak discharge 
+            based on user-provided regression coefficients.
+        </p>
+        
+        <h2>Inputs:</h2>
+        <ul>
+            <li><b>- CRS</b>: Coordinate Reference System.</li>
+            <li><b>- DEM</b>: Digital Elevation Model raster layer.</li>
+            <li><b>- Minimum Area</b>: Minimum area threshold for watershed delineation (e.g., 50000).</li>
+            <li><b>- Outfall</b>: Vector point layer indicating outfall location.</li>
+            <li><b>- Land Cover</b>: Vector polygon layer representing land cover (e.g. Geoportal Land Cover).</li>
+            <li><b>- Soil Type</b>: Vector polygon layer representing soil types (BWSM Soil Type from Geoportal).</li>
+            <li><b>- Save Folder</b>: Destination folder for outputs.</li>
+            <li><b>- Regression CSV</b>: CSV file containing regression coefficients for different return periods.</li>
+        </ul>
+        
+        <h2>Outputs:</h2>
+        <ul>
+            <li><b>Basin Summary</b>: CSV file summarizing basin characteristics and peak discharges at different return periods using rational method.</li>
+        </ul>
+        
+        <h2>Process Overview:</h2>
+        <ol>
+            <li>1. Reprojects input layers to the specified CRS.</li>
+            <li>2. Fills DEM depressions and calculates flow accumulation.</li>
+            <li>3. Extracts stream networks and delineates watersheds and subbasins.</li>
+            <li>4. Intersects land cover and soil data with subbasins.</li>
+            <li>5. Calculates runoff coefficients and time of concentration using various hydrological methods.</li>
+            <li>6. Compiles results into a summary CSV.</li>
+        </ol>
+        """
 
     def createInstance(self):
-        return generate_cn()
+        return scs_lag()
