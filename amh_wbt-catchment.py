@@ -270,7 +270,7 @@ class wbt_catchment(QgsProcessingAlgorithm):
 
         alg_params = {
             'flow_accum':outputs['d8FlowAccum']['output'],
-            'threshold':10000,
+            'threshold':parameters['minimum_area'],
             'zero_background':False,
             'output':os.path.join(wbt_file, 'wbt_streams-raster.tif')
         }
