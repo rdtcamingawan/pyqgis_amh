@@ -97,27 +97,24 @@ class wbt_catchment(QgsProcessingAlgorithm):
         # Return the max tc
 
         tc_list = [] # Intialize a list of time of concentration
-        area_acres = area * 247.105 # converts
+        area_acres = area * 2.47105 # converts
         
-        if 3 <= slope*100 <= 10 and 1 <= area_acres <= 112:
+        if 3 <= slope*100 <= 10 and area_acres <= 112:
             tc_list.append(self.kirpich(length=l, slope=slope))
         
-        if slope > 0 and area_acres < 5:  # Condition for Izzard (1946)
+        if slope > 0 and area_acres < 2000:  # Condition for Izzard (1946)
             tc_list.append(self.izzard(a, d, b, rc, l, slope, _threshold))
         
         if slope > 0 and area_acres > 112:  # Condition for Federal Aviation Admin (1970)
             tc_list.append(self.faa(l, slope, c))
         
-        if slope >= 0 and area_acres:  # Condition for Kinematic Wave Formulas
-            tc_list.append(self.kinematic(a, d, b, n, l, slope, _threshold))
+        # Always compute for the Kinematic Wave Formula
+        tc_list.append(self.kinematic(a, d, b, n, l, slope, _threshold))
         
-        if slope <= 2000 and area_acres < 3:  # Condition for SCS Lag Equation (1975)
+        if slope < 3 and area_acres <= 2000:  # Condition for SCS Lag Equation (1975)
             tc_list.append(self.scs(cn, l, slope))
         
-        else:
-            tc_list.append((0, 'none')) # If there are no applicable method this function will return tc=0
-        
-        return max(tc_list, key= lambda tc: tc[0]) 
+        return min(tc_list, key= lambda tc: tc[0]) 
     
     def runoff_df(self):
         data_runoff_c = {
@@ -795,16 +792,15 @@ class wbt_catchment(QgsProcessingAlgorithm):
                 c = filtered_df[f"mult-runC-{row['rp']}-yr"].sum() / scs_area # Computes for the weighted runoff coefficient
                 l = longestFlowPath * 3.28084 # Converts the longest flow path to feet [English metric]
                 s = aveSlope / 100.0 # Converts the slope (%) to float (#.##)
-                area = scs_area * 0.01 # Converts hectares to sq.km for computation of peak dischage
                 _threshold = 10e-10 # Sets the threshold. This controls the precision of the computed tc
 
-                tc = self.time_of_conc(a, d, b, w_retC, w_nValue, w_cn, s, area, l, c, _threshold)
+                tc = self.time_of_conc(a, d, b, w_retC, w_nValue, w_cn, s, scs_area, l, c, _threshold)
                 feedback.pushInfo(f"type: {type(tc)} | tc= {tc}")
                 i = a * (tc[0] + d) ** b # Use only the first element in the time_of_conc method
-                q = 0.278 * c * i * area
+                q = 0.278 * c * i * scs_area * 0.01
 
                 # Store all available variables in the subbasin_list
-                subbasin_list = [subbasinNumber, scs_area, w_cn, w_nValue, w_retC, longestFlowPath, aveSlope, row['rp'], c, tc[0], tc[1], q]
+                subbasin_list = [subbasinNumber, scs_area, w_cn, w_nValue, w_retC, longestFlowPath, aveSlope, row['rp'], c, tc[0], tc[1], i, q]
 
                 # Append subbasin_list to basin_summary
                 basin_summary.append(subbasin_list)
@@ -816,7 +812,7 @@ class wbt_catchment(QgsProcessingAlgorithm):
             return {}
                 
         # Initialize the column header names for the basin summary
-        basin_header = ['subbasin', 'area_has', 'cn', 'n-value', 'retardance-c', 'flowpath', 'slope', 'rp', 'runoff-c', 'tc', 'method', 'discharge'] # Column names for the Basin summary
+        basin_header = ['subbasin', 'area_has', 'cn', 'n-value', 'retardance-c', 'flowpath', 'slope', 'rp', 'runoff-c', 'tc', 'method', 'intensity','discharge'] # Column names for the Basin summary
 
         basin_df = pd.DataFrame(basin_summary, columns=basin_header, index=None) # save the list as a DataFrame
         basin_df.to_csv(os.path.join(wbt_file, 'basin_summary.csv')) # save the DataFrame as CSV
