@@ -27,10 +27,10 @@ def flow_extract(plan_file):
 
     # Read the HDF5 File
     with h5py.File(ras_hdf_file, 'r') as f:
-        # Get the Plan ShortID - this represents
-        # the simulation or return period
+        # Get the Flow Title
+        # This represents the flow scenario of the plan
         short_id_path = '/Plan Data/Plan Information'
-        plan_id = f[short_id_path].attrs['Plan ShortID'].decode('utf-8')
+        flow_id = f[short_id_path].attrs['Flow Title'].decode('utf-8')
 
         # Get the names of the reference line
         ref_name_path = r'/Geometry/Reference Lines/Attributes'
@@ -70,13 +70,13 @@ def flow_extract(plan_file):
         # Create a DataFrame
         df = pd.DataFrame({
             'Station' : ref_col_names,
-            'Plan ID' : plan_id, 
+            'Flow Scenario' : flow_id, 
             'Discharge' : ref_flow,
             'Velocity' : ref_velocity,
             'Flow Area': ref_max_flow_area,
             'WSE': ref_wse,
             'EGL': ref_egl
-            'Thalweg' : get_lowest_elev()
+            # 'Thalweg' : get_lowest_elev()
         })
 
     return df
@@ -148,11 +148,19 @@ def get_lowest_elev(ref_line_vlayer, raster_layer):
 
     return min_value
 
+
+"""
+Inputs from the users are:
+
+1. RAS Folder
+2. Reference Line in SHP file Format
+"""
+# Get Inputs from the user
 # Get the RAS Folder and get all .p##.hdf files
 # input_ras_folder = input("Paste RAS Folder Path: ").strip().strip('"')
 # ras_folder = os.path.normpath(input_ras_folder)
 
-ras_folder = r"D:\AMH Philippines, Inc\PP23.307 Rockwell and Roll - General\06 NP23.000 WORK FILES\Richmond\My Documents\Python\amh_pyqgis\flow_extraction\RAS"
+ras_folder = r"C:\Users\richmond\AMH Philippines, Inc\PP23.307 Rockwell and Roll - My Documents\Python\amh_pyqgis\flow_extraction\RAS"
 save_folder = os.path.join(ras_folder, "summary.csv")
 glob_key = os.path.join(ras_folder, "*.p*.hdf")
 ras_plan = glob(glob_key, recursive=True)
@@ -181,7 +189,7 @@ for plan in ras_plan:
     df_extract = flow_extract(plan)
     dfs.append(df_extract)
 
-df_concat = pd.concat(dfs, ignore_index=True).sort_values(by=['Reference Line', 'Plan ID'])
+df_concat = pd.concat(dfs, ignore_index=True).sort_values(by=['Station', 'Plan ID'])
 df_concat.to_csv(save_folder)
 
 # Exit of QGIS
