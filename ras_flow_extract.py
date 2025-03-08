@@ -45,7 +45,7 @@ class Form(QDialog):
         self.selected_folder = None
         self.selected_ref_lineshp_file = None
         self.selected_terrain_file = None
-        self.selected_field = None # This is the selected field fromt he combobox
+        self.selected_field = None # This is the selected field from the combobox
 
         # Folder selection widgets
         self.folder_label = QLabel('Select RAS Folder: ')
@@ -280,13 +280,9 @@ class Form(QDialog):
 
             # Compute the Max Flow Area
             # Given by the Eq. Q = A * V; A = Q / V
-            # Given by the Eq. Q = A * V; A = Q / V
-            ref_max_flow_area_array = np.where(
-                                        ref_vel_array != 0,
-                                        np.divide(ref_flow_array, ref_vel_array,),
-                                        np.nan
-                                        )
-            ref_max_flow_area = np.nanmax(ref_max_flow_area_array, axis=0).tolist()
+            with np.errstate(divide='ignore', invalid='ignore'):
+                ref_max_flow_area_array = np.divide(ref_flow_array, ref_vel_array)
+                ref_max_flow_area = np.nanmax(ref_max_flow_area_array, axis=0).tolist()
 
             # Get the Max WSE
             ref_wse_array = f[ref_line_path]['Water Surface']
