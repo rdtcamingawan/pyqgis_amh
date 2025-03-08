@@ -6,13 +6,13 @@ import numpy as np
 import pandas as pd
 from glob import glob
 
-# Import PySide6 Modules
-from PySide6.QtWidgets import (
+# Import PyQt5 Modules
+from PyQt5.QtWidgets import (
     QApplication, QDialog, QLineEdit, QPushButton,
     QVBoxLayout, QFileDialog, QLabel, QHBoxLayout,
     QComboBox, QProgressBar
 )
-from PySide6.QtCore import Qt, QSize
+from PyQt5.QtCore import Qt, QSize
 
 # Import QGIS Modules
 import processing
@@ -422,6 +422,6 @@ if __name__ == '__main__':
     form.show()
 
     # Run the main Qt loop
-    sys.exit(app.exec())
+    sys.exit(app.exec_())
 
     
