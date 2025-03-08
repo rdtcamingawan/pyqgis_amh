@@ -280,9 +280,11 @@ class Form(QDialog):
 
             # Compute the Max Flow Area
             # Given by the Eq. Q = A * V; A = Q / V
-            ref_max_flow_area_array = np.divide(
-                                        ref_flow_array,
-                                        ref_vel_array,
+            # Given by the Eq. Q = A * V; A = Q / V
+            ref_max_flow_area_array = np.where(
+                                        ref_vel_array != 0,
+                                        np.divide(ref_flow_array, ref_vel_array,),
+                                        np.nan
                                         )
             ref_max_flow_area = np.nanmax(ref_max_flow_area_array, axis=0).tolist()
 
