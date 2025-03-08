@@ -2,9 +2,14 @@ import sys
 import re
 import os
 import h5py
+import rasterio
 import numpy as np
 import pandas as pd
+import geopandas as gpd
 from glob import glob
+from shapely.geometry import LineString, Point
+from rasterio.sample import sample_gen
+
 
 # Import PyQt5 Modules
 from PyQt5.QtWidgets import (
@@ -12,7 +17,6 @@ from PyQt5.QtWidgets import (
     QVBoxLayout, QFileDialog, QLabel, QHBoxLayout,
     QComboBox, QProgressBar
 )
-from PyQt5.QtCore import Qt, QSize
 
 # Import QGIS Modules
 import processing
