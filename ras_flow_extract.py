@@ -23,12 +23,6 @@ from qgis.core import (QgsProcessing,
                        QgsVectorLayer, 
                        QgsRasterLayer,
                        QgsFeatureRequest,
-                       QgsProcessing,
-                       QgsProcessingAlgorithm,
-                       QgsProcessingMultiStepFeedback,
-                       QgsProcessingParameterFile,
-                       QgsProcessingParameterVectorLayer,
-                       QgsProcessingParameterRasterLayer
                        )
 # Intialize QGIS
 qgs = QgsApplication([], False)
