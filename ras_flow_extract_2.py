@@ -10,19 +10,26 @@ if getattr(sys, 'frozen', False):
     gdal.AllRegister()
     ogr.RegisterAll()
 
+# Imports for Vector Handling
 import fiona
 import geopandas as gpd
+import shapely
+from shapely.geometry   import LineString, mapping
+
+# Imports for Rasterio: raster processing
 import rasterio
 from rasterio.warp      import calculate_default_transform, reproject, Resampling
 from rasterio.features  import rasterize
 from rasterio.warp      import transform_geom
-from shapely.geometry   import LineString, mapping
+
+# Imports for File Handling
 import h5py
+import re
 import numpy as np
 import pandas as pd
-import re
-from glob               import glob
+from glob import glob
 
+# Import for Tkinter - UI Handling
 import tkinter as tk
 from tkinter import filedialog, ttk, messagebox
 
@@ -44,6 +51,7 @@ class ExtractFlowApp(tk.Tk):
         self.selected_ref_lineshp_file = None
         self.selected_terrain_file = None
         self.selected_field = None
+        self.selected_centerline_file = None
 
         # ——— UI ———
         # RAS Folder
@@ -58,6 +66,13 @@ class ExtractFlowApp(tk.Tk):
         self.terrain_label = tk.Label(frame, text="Select Terrain:")
         self.terrain_label.pack(side="left")
         tk.Button(frame, text="...", width=3, command=self.select_terrain_file)\
+          .pack(side="left", padx=(5,0))
+        
+        # Centerline SHP File
+        frame = tk.Frame(self); frame.pack(fill="x", padx=10, pady=5)
+        self.centerline_label = tk.Label(frame, text="Select Centerline SHP File:")
+        self.centerline_label.pack(side="left")
+        tk.Button(frame, text="...", width=3, command=self.select_centerline_shp_file)\
           .pack(side="left", padx=(5,0))
 
         # Profile Line
@@ -126,7 +141,8 @@ class ExtractFlowApp(tk.Tk):
 
         # load & cache GDF in both CRS’s
         self._gdf_orig  = gpd.read_file(shp)
-        self._gdf_32651 = self._gdf_orig.to_crs(epsg=32651)
+        self._gdf_32651 = self._gdf_orig
+        # self._gdf_32651 = self._gdf_orig.to_crs(self.terrain_crs)
 
         # populate combobox from the in-memory GDF
         fields = list(self._gdf_orig.columns)
@@ -143,6 +159,20 @@ class ExtractFlowApp(tk.Tk):
         if raster:
             self.selected_terrain_file = raster
             self.terrain_label.config(text=os.path.basename(raster))
+        
+        # Get the CRS of the Terrain
+        src = rasterio.open(self.selected_terrain_file)
+        self.terrain_crs = src.crs
+        src.close()
+
+    def select_centerline_shp_file(self):
+        centerline_shp_path = filedialog.askopenfilename(
+            title="Select Centerline SHP File",
+            filetypes=[("Vectors", "*.shp")]
+        )
+        if centerline_shp_path:
+            self.selected_centerline_file = centerline_shp_path
+            self.centerline_label.config(text=os.path.basename(centerline_shp_path))
 
     # ——— Combobox ———
     def populate_combobox(self):
@@ -155,17 +185,52 @@ class ExtractFlowApp(tk.Tk):
     def on_combobox_change(self, event):
         self.selected_field = self.combobox.get()
 
-    # ——— Helper Function to Sample along line ———
+    # ---------- Main Logic For Flow Extraction ----------
+
+
+    # ——— Helper Function to Sample intersected Raster Points ———
+    def sample_raster_point(self, ref_line_geom, centerlines_gdf, raster_path):
+        """
+        Sample a raster at the single intersection point between ref_line_geom
+        and any of the lines in centerlines_gdf. Returns the sampled value
+        (or tuple of band values) or 0.0 if there’s no valid intersection.
+        """
+        # Read the centerline_gdf as in a GeoDataFrame
+        centerlines_gdf = gpd.read_file(centerlines_gdf)
+        # centerlines_gdf = gpd.read_file(centerlines_gdf).to_crs(self.terrain_crs)
+
+        # Read the raster file
+        with rasterio.open(raster_path) as src:
+            # Intersect ref_line feature to centerline_shp file
+            point = shapely.intersection(ref_line_geom, centerlines_gdf.geometry)
+            # Filter for valid points only
+            valid_point = point[point.notna() & ~point.is_empty & (point.geom_type == 'Point')]
+
+            # Try if valid_point is a Point Geometry
+            try:
+                x_coor = valid_point.x
+                y_coor = valid_point.y
+                coord_list = [(x_coor, y_coor)]
+                sampled_raster = np.array([arr[0] for arr in src.sample(coord_list)])
+                return sampled_raster.item()
+
+            # For now, return 0 if it's a MultiPoint Geometry
+            except Exception as e:
+                print
+                return 0
+        
+     # Helper Function to get the Max Value along a line on a Raster file
     def _sample_along_line(self, raster_path, line, reducer, default=0.0):
         """
-        Open `raster_path`, rasterize the `line` into it, then return
-        reducer(masked_array). On any error, return `default`.
-        `reducer` is a function like np.nanmin or np.nanmax.
+        Open raster_path, rasterize the line into it, then return
+        reducer(masked_array). On any error, return default.
+        reducer is a function like np.nanmin or np.nanmax.
         """
         try:
             with rasterio.open(raster_path) as src:
                 # reproject your line into the raster’s CRS
-                geom = transform_geom('EPSG:32651', src.crs, mapping(line))
+                # geom = transform_geom(self.terrain_crs, src.crs, mapping(line))
+                geom = mapping(line)
                 mask = rasterize(
                     [(geom, 1)],
                     out_shape=(src.height, src.width),
@@ -199,21 +264,53 @@ class ExtractFlowApp(tk.Tk):
             terrain_raster, line, reducer=np.nanmin, default=np.nan
                                 )
 
-        # ——— Max Velocity ———
+        # ——— Velocity ———
         vel_paths = glob(os.path.join(plan_folder, 'Velocity (Max).vrt'))
+        # Sample Along the Line
         max_velocity = (
             self._sample_along_line(vel_paths[0], line, reducer=np.nanmax)
             if vel_paths else 0.0
-            )   
+            )
+        # Sample at the center of the reference line
+        cl_velocity = (
+            self.sample_raster_point(line, self.selected_centerline_file, vel_paths[0])
+            if vel_paths else 0.0
+        )
 
-        # ——— Max Froude ———
+        # ——— Froude ———
         fr_paths  = glob(os.path.join(plan_folder, 'Froude (Max).vrt'))
+        # Sample Along the Line
         max_froude = (
             self._sample_along_line(fr_paths[0], line, reducer=np.nanmax)
             if fr_paths else 0.0
         )
+        # Sample at the center of the reference line
+        cl_froude = (
+            self.sample_raster_point(line, self.selected_centerline_file, fr_paths[0])
+            if fr_paths else 0.0
+        )
 
-        return min_terrain, max_velocity, max_froude
+        # ——— EGL ———
+        egl_paths  = glob(os.path.join(plan_folder, 'Energy (Elevation)*.vrt'))
+        # Sample Along the Line
+        max_egl = (
+            self._sample_along_line(egl_paths[0], line, reducer=np.nanmax)
+            if fr_paths else 0.0
+        )
+        # Sample at the center of the reference line
+        cl_egl = (
+            self.sample_raster_point(line, self.selected_centerline_file, egl_paths[0])
+            if egl_paths else 0.0
+        )
+
+        # ——— WSE ———
+        wse_paths  = glob(os.path.join(plan_folder, 'WSE (Max)*.vrt'))
+        cl_wse = (
+            self.sample_raster_point(line, self.selected_centerline_file, wse_paths[0])
+            if vel_paths else 0.0
+        )
+
+        return min_terrain, max_velocity, max_froude, max_egl, cl_wse, cl_velocity, cl_froude, cl_egl
 
 
     def flow_extract(self, plan_file):
@@ -251,7 +348,7 @@ class ExtractFlowApp(tk.Tk):
                   '/Results/Unsteady/Output/Output Blocks/'
                   'DSS Hydrograph Output/Unsteady Time Series/Reference Lines/Water Surface'
                 ]
-                max_wse = np.max(wse_ts, axis=0).tolist()
+                ave_wse = np.max(wse_ts, axis=0).tolist()
 
         except (KeyError, OSError) as e:
             logger.warning("Skipping %s: %s", os.path.basename(plan_file), e)
@@ -263,9 +360,8 @@ class ExtractFlowApp(tk.Tk):
             'Station':        stations,
             'Flow Scenario':  flow_id,
             'Discharge':      max_discharge,
-            'WSE':            max_wse
+            'AveWSE' :        ave_wse
         })
-
 
     def output_flow(self):
         # hide button, show progress
@@ -319,6 +415,7 @@ class ExtractFlowApp(tk.Tk):
             if df is None:
                 skip_records.append((plan_shortID, os.path.basename(plan)))
                 continue
+            # Append to list of DataFrames
             dfs.append(df)
 
             # advance progress bar a bit per plan
@@ -346,7 +443,9 @@ class ExtractFlowApp(tk.Tk):
         metrics = uniq.apply(
             lambda r: pd.Series(
                 self.get_values(r['Station'], r['Plan ShortID']),
-                index=['Thalweg','MaxVelocity','MaxFroude']
+                index=['Thalweg', 'MaxVelocity', 'MaxFroude', 'MaxEGL',
+                       'CL-WSE','CL-Velocity','CL-Froude', 'CL-EGL', 
+                       ]
             ),
             axis=1
         )
@@ -354,16 +453,6 @@ class ExtractFlowApp(tk.Tk):
         df_merged = df_all.merge(metrics_df,
                                 on=['Plan ShortID','Station'],
                                 how='left')
-
-        # Flow Area (guard div-by-zero)
-        df_merged['Flow Area'] = df_merged.apply(
-            lambda r: r['Discharge']/r['MaxVelocity']
-                    if r['MaxVelocity']>0 else 0.0,
-            axis=1
-        )
-        # EGL
-        g = 9.81
-        df_merged['EGL'] = df_merged['WSE'] + df_merged['MaxVelocity']**2/(2*g)
 
         # round, sort, save
         floats = df_merged.select_dtypes('float').columns
