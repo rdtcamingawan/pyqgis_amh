@@ -291,12 +291,11 @@ class ExtractFlowApp(tk.Tk):
         )
 
         # ——— EGL ———
-        egl_paths  = glob(os.path.join(plan_folder, 'Energy (Elevation)*.vrt'))
+        egl_paths  = glob(os.path.join(plan_folder, 'ege*.tif'))
         # Sample Along the Line
-        max_egl = (
-            self._sample_along_line(egl_paths[0], line, reducer=np.nanmax)
-            if fr_paths else 0.0
-        )
+        # This only solves for the Velocity head. WSE would be added later on...
+        max_egl = (max_velocity ** 2) / (2 * 9.81) 
+        
         # Sample at the center of the reference line
         cl_egl = (
             self.sample_raster_point(line, self.selected_centerline_file, egl_paths[0])
@@ -439,7 +438,7 @@ class ExtractFlowApp(tk.Tk):
         uniq = (df_all[['Plan ShortID','Station']]
                 .drop_duplicates()
                 .reset_index(drop=True))
-
+        
         metrics = uniq.apply(
             lambda r: pd.Series(
                 self.get_values(r['Station'], r['Plan ShortID']),
@@ -449,6 +448,7 @@ class ExtractFlowApp(tk.Tk):
             ),
             axis=1
         )
+        # metrics['MaxEGL'] = metrics['AveWSE'] + metrics['MaxEGL']
         metrics_df = pd.concat([uniq, metrics], axis=1)
         df_merged = df_all.merge(metrics_df,
                                 on=['Plan ShortID','Station'],
@@ -463,6 +463,7 @@ class ExtractFlowApp(tk.Tk):
             inplace=True
         )
 
+        df_merged['MaxEGL'] = df_merged['MaxEGL'] + df_merged['AveWSE']
         df_merged.to_csv(save_csv, index=False)
         df_merged.to_html(save_html, index=False)
 
