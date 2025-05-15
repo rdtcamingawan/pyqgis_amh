@@ -7,6 +7,9 @@ import pandas as pd
 from tkinter import Tk, filedialog, ttk, StringVar, scrolledtext, END, VERTICAL, HORIZONTAL
 from pydsstools.heclib.dss import HecDss
 from matplotlib import pyplot as plt
+import matplotlib.dates as mdates
+# Set a date format
+dtFmt = mdates.DateFormatter('%dd-%b') # 01-Jan
 # If you prefer an embedded plot inside Tkinter, uncomment the next 2 lines
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 # plt.switch_backend("Agg")        # keep tk backend free for embedding
@@ -100,13 +103,13 @@ def compute_nse_per_run(df, run_id, hms_dss_path, dss_name, csv_save_path):
             df_obs_f = df_obs[df_obs['extraction_point'] == sub]
             df_m = pd.merge(df_obs_f, df_sim, on='date')
             mean_obs = df_m['discharge'].mean()
-            nse = 1 - ((df_m['discharge']-df_m['pred_value'])**2).sum() / \
-                        ((df_m['discharge']-mean_obs)**2).sum()
+            nse = 1 - (((df_m['discharge']-df_m['pred_value'])**2).sum() / \
+                        ((df_m['discharge']-mean_obs)**2).sum())
             print(f"NSE for {ep:>15}: {nse:8.4f}")
 
             mask = (df['run_id']==run_id) & (df['name'].isin(mapping[ep]))
             df.loc[mask,'nse'] = nse
-            print(f"Assigned NSE {nse:8.4f} → {mapping[ep]}")
+            # print(f"Assigned NSE {nse:8.4f} → {mapping[ep]}")
     df.to_csv(csv_save_path, index=False)
 
 def plot_current_run(hms_dss_path, dss_name, csv_save_path):
@@ -149,6 +152,8 @@ def plot_current_run(hms_dss_path, dss_name, csv_save_path):
             ax.set_title(sub)
             ax.set_xlabel('Date'); ax.set_ylabel('Discharge')
             ax.grid(True, linestyle='--', alpha=0.5)
+            ax.xaxis.set_major_formatter(mdates.ConciseDateFormatter(ax.xaxis.get_major_locator()))
+        
 
     # NSE subplot bottom‑right
     ax = axes[3]
@@ -158,9 +163,10 @@ def plot_current_run(hms_dss_path, dss_name, csv_save_path):
         ax.plot(nse_vals.values, label=f'NSE {ep}')
     ax.legend()
 
-    fig.autofmt_xdate(); fig.tight_layout()
+    # fig.autofmt_xdate()
+    fig.tight_layout()
 
-    return fig            # ←‑‑‑ return instead of plt.show()
+    return fig       
 
 
 # ────────────────────────────  TKINTER GUI  ──────────────────────────────── #
@@ -170,7 +176,7 @@ class RedirectToText:
     def __init__(self, text_widget): self.text = text_widget
     def write(self, s):
         self.text.insert(END, s); self.text.see(END)
-    def flush(self): pass   # nothing needed
+    def flush(self): pass   
 
 def run_model():
     """Collect user inputs, run the whole pipeline in a worker thread."""
@@ -181,19 +187,19 @@ def run_model():
     xl_path     = xl_var.get()
 
     if not (project_dir and basin_name and dss_name and xl_path):
-        print("⚠️  Please fill in every field."); return
+        print("Please fill in every field."); return
 
     # Build derived paths
     basin_path  = os.path.join(project_dir, f"{basin_name}.basin")
     dss_path    = os.path.join(project_dir, f"{dss_name}.dss")
     csv_path    = os.path.join(project_dir, 'NSE_computation', 'NSE.csv')
 
-    print("\n────────────  RUN STARTED", datetime.datetime.now().strftime("%c"), "────────────")
-    print(f"HMS Project Dir  : {project_dir}")
-    print(f"Basin file       : {os.path.basename(basin_path)}")
-    print(f"DSS file         : {os.path.basename(dss_path)}")
-    print(f"Observed data    : {os.path.basename(xl_path)}")
-    print("────────────────────────────────────────────────────────────────────────")
+    # print("\n────────────  RUN STARTED", datetime.datetime.now().strftime("%c"), "────────────")
+    # print(f"HMS Project Dir  : {project_dir}")
+    # print(f"Basin file       : {os.path.basename(basin_path)}")
+    # print(f"DSS file         : {os.path.basename(dss_path)}")
+    # print(f"Observed data    : {os.path.basename(xl_path)}")
+    # print("────────────────────────────────────────────────────────────────────────")
 
     # bring df_obs into global scope for downstream functions
     global df_obs
@@ -209,13 +215,13 @@ def run_model():
     fig = plot_current_run(dss_path, dss_name, csv_path)
 
     # ---- embed or refresh canvas --------------------------------------------
-    global plot_canvas          # keep a reference so we can replace it on reruns
+    global plot_canvas        
     try:
         plot_canvas.get_tk_widget().destroy()
     except NameError:
-        pass                     # first run – nothing to destroy
+        pass                    
 
-    plot_canvas = FigureCanvasTkAgg(fig, master=root)  # master=any frame you like
+    plot_canvas = FigureCanvasTkAgg(fig, master=root)  
     plot_canvas.draw()
     plot_canvas.get_tk_widget().pack(fill='both', expand=True, padx=10, pady=5)
 
@@ -247,11 +253,11 @@ add_row("DSS name   :", dss_var)
 add_row("Observed xlsx:", xl_var,
         lambda: xl_var.set(filedialog.askopenfilename(
             filetypes=[("Excel files","*.xlsx"),("All files","*")] )))
-ttk.Button(frm, text="Run model", command=start_thread).pack(pady=5)
+ttk.Button(frm, text="Run model", command=start_thread).pack(pady=1)
 
 # ---------- log / output frame ----------
-log = scrolledtext.ScrolledText(root, height=20, wrap='word')
-log.pack(fill='both', expand=True, padx=10, pady=(0,10))
+log = scrolledtext.ScrolledText(root, height=10, wrap='word')
+log.pack(fill='both', expand=False, padx=10, pady=(0,3))
 
 # Redirect stdout so every print appears in the GUI
 sys.stdout = RedirectToText(log)
