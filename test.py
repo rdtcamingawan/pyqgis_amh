@@ -39,11 +39,20 @@ def parse_subbasin_reach(filepath):
                 current[col] = v.strip()
     df = pd.DataFrame(records)
     expected_cols = [  # same fixed order as your script
-        'type','name','area','downstream','discretization','canopy',
+        'type','name','area','downstream','discretization',
+        
+        # Simple Canopy Method
+        'canopy',
         'allow_simultaneous_precip_et','plant_uptake_method',
         'initial_canopy_storage_percent','canopy_storage_capacity',
-        'crop_coefficient','surface','initial_surface_storage_percent',
-        'surface_storage_capacity','surface_albedo','lossrate',
+        'crop_coefficient',
+        
+        # Simple Surface Method
+        'surface','initial_surface_storage_percent',
+        'surface_storage_capacity','surface_albedo',
+        
+        # Soil Moisture Accounting
+        'lossrate',
         'percent_impervious_area','initial_soil_storage_percent',
         'initial_gw1_storage_percent','initial_gw2_storage_percent',
         'soil_maximum_infiltration','soil_storage_capacity',
@@ -51,9 +60,29 @@ def parse_subbasin_reach(filepath):
         'groundwater_1_storage_capacity','groundwater_1_routing_coefficient',
         'groundwater_1_maximum_percolation','groundwater_2_storage_capacity',
         'groundwater_2_routing_coefficient','groundwater_2_maximum_percolation',
-        'transform','lag','unitgraph_type','baseflow','recession_factor',
-        'initial_baseflow','threshold_flow_to_peak_ratio','route',
-        'initial_variable','channel_loss']
+        
+        # Kinematic Wave Transform
+        'transform','plane', 
+        'plane_1_roughness', 'plane_1_number_of_steps',
+        'plane_2_roughness', 'plane_2_number_of_steps',
+        'channel', 'subcollector_mannings_n', 'subc_steps',
+        'channel', 'collector_mannings_n', 'collector_steps',
+        'channel', 'channel_mannings_n', 'shape', 'channel_steps',
+        
+        # Recession Baseflow Method
+        'baseflow','recession_factor',
+        'initial_baseflow','threshold_flow_to_peak_ratio',
+
+        # Linear Reservoir Method
+        'baseflow', 'groundwater_layer', 'gw_1_baseflow_fraction',
+        'gw_1_number_of_reservoirs', 'gw_1_routing_coefficient','gw_1_initial_baseflow', 
+        'groundwater_layer',
+        'gw_2_baseflow_fraction','gw_2_number_of_reservoirs', 'gw_2_routing_coefficient','gw_2_initial_baseflow', 
+        
+
+
+        # Reach Methods
+        'route','initial_variable','channel_loss']
     # make sure all columns exist even if blank
     for c in expected_cols:
         if c not in df.columns: df[c] = np.nan
