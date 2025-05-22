@@ -225,6 +225,62 @@ class ExtractFlowApp(tk.Tk):
     def on_combobox_change(self, event):
         self.selected_field = self.combobox.get()
 
+    # ---- Sorting Algorithm ----
+    def station_sort_key(self, station_str):
+        txt = str(station_str)
+
+        # 1) split off anything before "Sta"
+        pm = re.match(r'^(.*?)Sta', txt, re.IGNORECASE)
+        prefix = pm.group(1).strip() if pm else ''
+        has_prefix = bool(prefix)
+        prefix_key = prefix.upper()
+
+        # 2) parse the "Sta X+Y[.Z]" pattern (allow decimals)
+        mm = re.search(r'Sta\s*(\d+)\+(\d+(?:\.\d+)?)', txt, re.IGNORECASE)
+        if mm:
+            base   = int(mm.group(1))
+            offset = float(mm.group(2))
+        else:
+            # fallback to your old numeric regex (e.g. "123.45")
+            fm = self._STATION_RE.match(txt)
+            if fm:
+                base   = int(fm.group(1))
+                offset = float(fm.group(2)) if fm.group(2) else 0.0
+            else:
+                # completely unrecognized → send to the very end
+                return (2, '', float('inf'), float('inf'), 0)
+
+        # 3) capture any trailing group index like "(1)"
+        gm = re.search(r'\((\d+)\)\s*$', txt)
+        group_idx = int(gm.group(1)) if gm else 0
+
+        # 4) build the tuple:
+        #    (0=with-prefix / 1=no-prefix, prefix_text, base, offset, group_idx)
+        return (
+            0 if has_prefix else 1,
+            prefix_key,
+            base,
+            offset,
+            group_idx
+        )
+    
+    def flow_scenario_sort_key(self, scenario_str):
+        txt = str(scenario_str).strip().upper()
+        m = re.match(r'^(\d+)\s*YR(?:\s*(PRE|POST))?$', txt)
+        if m:
+            num = int(m.group(1))
+            suf = m.group(2)
+            if   suf == 'PRE':   order = 0
+            elif suf == 'POST':  order = 2
+            else:                order = 1
+            return (order, num)
+
+        # anything else (OTHERS) → last
+        return (float('inf'), float('inf'))
+
+
+
+
     # ---------- Main Logic For Flow Extraction ----------
 
 
@@ -310,18 +366,16 @@ class ExtractFlowApp(tk.Tk):
                                      terrain_raster))
 
         # ——— Left Overbank (always expected) ———
-        lob_raster = self.selected_lob_file
         cl_lob = (
             self.sample_raster_point(line, 
                                      self.selected_lob_file, 
-                                     lob_raster))
+                                     terrain_raster))
         
         # ——— Right Overbank (always expected) ———
-        rob_raster = self.selected_rob_file
         cl_rob = (
             self.sample_raster_point(line, 
                                      self.selected_lob_file, 
-                                     rob_raster))
+                                     terrain_raster))
         
         # ——— Velocity ———
         vel_paths = glob(os.path.join(plan_folder, 'Velocity (Max).vrt'))
@@ -375,7 +429,7 @@ class ExtractFlowApp(tk.Tk):
 
                 # pull out plan metadata
                 info = f['/Plan Data/Plan Information']
-                # plan_shortID = info.attrs['Plan ShortID'].decode('utf-8')
+                plan_shortID = info.attrs['Plan ShortID'].decode('utf-8')
                 flow_id     = info.attrs['Flow Title'].decode('utf-8')
 
                 # reference line station names
@@ -395,6 +449,7 @@ class ExtractFlowApp(tk.Tk):
 
         # build and return DataFrame if everything succeeded
         return pd.DataFrame({
+            'Plan ShortID' : plan_shortID,
             'Station':        stations,
             'Flow Scenario':  flow_id,
             'Discharge':      max_discharge,
@@ -495,13 +550,66 @@ class ExtractFlowApp(tk.Tk):
         # round, sort, save
         floats = df_merged.select_dtypes('float').columns
         df_merged[floats] = df_merged[floats].round(3)
+
+        # Sort Values based on Station and Flow Scenario
         df_merged.sort_values(
             by=['Station','Flow Scenario'],
-            key=lambda col: col.map(self.station_sort_key),
+            key=lambda col: col.map(self.station_sort_key) 
+                        if col.name=='Station'
+                        else col.map(self.flow_scenario_sort_key),
             inplace=True
         )
 
-        df_merged.to_excel(save_xl, index=False)
+        # split into PRE and POST sets
+        base, ext = os.path.splitext(save_xl)
+        pre_fn  = f"{base}_pre{ext}"
+        post_fn = f"{base}_post{ext}"
+
+        mask = df_merged['Flow Scenario'].str.upper()
+        df_pre  = df_merged[mask.str.endswith('PRE')]
+        df_post = df_merged[mask.str.endswith('POST')]
+
+        # Function for writing separate PRE and POST Excel Files
+        def write_and_merge(df, filename):
+            with pd.ExcelWriter(filename, engine='openpyxl') as writer:
+                df.to_excel(writer, index=False, sheet_name='Sheet1')
+                ws = writer.sheets['Sheet1']
+
+                # map col name → Excel col index
+                col_idx = {c: i+1 for i, c in enumerate(df.columns)}
+                merge_columns = ['Station','CL-Terrain','CL-LOB','CL-ROB']
+
+                for col in merge_columns:
+                    if df.empty:
+                        continue
+                    start_row = 2
+                    prev = df.iloc[0][col]
+                    last_row = start_row
+                    for excel_row, val in enumerate(df[col], start=2):
+                        if val != prev:
+                            if start_row < excel_row - 1:
+                                ws.merge_cells(
+                                    start_row=start_row,
+                                    start_column=col_idx[col],
+                                    end_row=excel_row-1,
+                                    end_column=col_idx[col]
+                                )
+                            start_row, prev = excel_row, val
+                        last_row = excel_row
+                    # final run
+                    if start_row < last_row:
+                        ws.merge_cells(
+                            start_row=start_row,
+                            start_column=col_idx[col],
+                            end_row=last_row,
+                            end_column=col_idx[col]
+                        )
+
+        # write both files
+        write_and_merge(df_pre,  pre_fn)
+        write_and_merge(df_post, post_fn)
+
+        # df_merged.to_excel(save_xl, index=False)
 
         # finish UI
         self.progress_bar['value'] = 100
@@ -518,15 +626,6 @@ class ExtractFlowApp(tk.Tk):
                                 for pid, fname in skip_records)
 
         messagebox.showinfo("Done!", summary)
-
-    def station_sort_key(station_str):
-        m = self._STATION_RE.match(station_str)
-        if m:
-            base   = int(m.group(1))     # station number
-            offset = float(m.group(2))   # offset (decimal)
-            return (base, offset)
-        # unmatched go last
-        return (float('inf'), 0.0)
 
     # ——— Exit ———
     def exit_app(self):
