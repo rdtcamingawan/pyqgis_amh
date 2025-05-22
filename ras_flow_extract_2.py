@@ -52,6 +52,14 @@ class ExtractFlowApp(tk.Tk):
         self.selected_terrain_file = None
         self.selected_field = None
         self.selected_centerline_file = None
+        self.selected_lob_file = None
+        self.selected_rob_file = None
+
+        # Sorting key
+        self._STATION_RE = re.compile(
+            r'^\s*(?:sta(?:tion)?)[\s-]*(\d+)\+(\d+(?:\.\d+)?)\s*$',
+            re.IGNORECASE
+        )
 
         # ——— UI ———
         # RAS Folder
@@ -73,6 +81,20 @@ class ExtractFlowApp(tk.Tk):
         self.centerline_label = tk.Label(frame, text="Select Centerline SHP File:")
         self.centerline_label.pack(side="left")
         tk.Button(frame, text="...", width=3, command=self.select_centerline_shp_file)\
+          .pack(side="left", padx=(5,0))
+        
+        # LOB SHP File
+        frame = tk.Frame(self); frame.pack(fill="x", padx=10, pady=5)
+        self.lob_label = tk.Label(frame, text="Select Left Overbank SHP File:")
+        self.lob_label.pack(side="left")
+        tk.Button(frame, text="...", width=3, command=self.select_lob_shp_file)\
+          .pack(side="left", padx=(5,0))
+        
+        # ROB SHP File
+        frame = tk.Frame(self); frame.pack(fill="x", padx=10, pady=5)
+        self.rob_label = tk.Label(frame, text="Select Right Overbank SHP File:")
+        self.rob_label.pack(side="left")
+        tk.Button(frame, text="...", width=3, command=self.select_rob_shp_file)\
           .pack(side="left", padx=(5,0))
 
         # Profile Line
@@ -174,6 +196,24 @@ class ExtractFlowApp(tk.Tk):
             self.selected_centerline_file = centerline_shp_path
             self.centerline_label.config(text=os.path.basename(centerline_shp_path))
 
+    def select_lob_shp_file(self):
+        lob_shp_path = filedialog.askopenfilename(
+            title="Select Left Overbank SHP File",
+            filetypes=[("Vectors", "*.shp")]
+        )
+        if lob_shp_path:
+            self.selected_lob_file = lob_shp_path
+            self.lob_label.config(text=os.path.basename(lob_shp_path))
+
+    def select_rob_shp_file(self):
+        rob_shp_path = filedialog.askopenfilename(
+            title="Select Right Overbank SHP File",
+            filetypes=[("Vectors", "*.shp")]
+        )
+        if rob_shp_path:
+            self.selected_rob_file = rob_shp_path
+            self.rob_label.config(text=os.path.basename(rob_shp_path))
+
     # ——— Combobox ———
     def populate_combobox(self):
         fields = list(self._gdf_orig.columns)
@@ -260,17 +300,31 @@ class ExtractFlowApp(tk.Tk):
 
         # ——— Terrain (always expected) ———
         terrain_raster = self.selected_terrain_file
-        min_terrain = self._sample_along_line(
-            terrain_raster, line, reducer=np.nanmin, default=np.nan
-                                )
+        # min_terrain = self._sample_along_line(
+        #     terrain_raster, line, reducer=np.nanmin, default=np.nan
+        #                         )
+        # Sample at the center of the reference line
+        cl_terrain = (
+            self.sample_raster_point(line, 
+                                     self.selected_centerline_file, 
+                                     terrain_raster))
 
+        # ——— Left Overbank (always expected) ———
+        lob_raster = self.selected_lob_file
+        cl_lob = (
+            self.sample_raster_point(line, 
+                                     self.selected_lob_file, 
+                                     lob_raster))
+        
+        # ——— Right Overbank (always expected) ———
+        rob_raster = self.selected_rob_file
+        cl_rob = (
+            self.sample_raster_point(line, 
+                                     self.selected_lob_file, 
+                                     rob_raster))
+        
         # ——— Velocity ———
         vel_paths = glob(os.path.join(plan_folder, 'Velocity (Max).vrt'))
-        # Sample Along the Line
-        max_velocity = (
-            self._sample_along_line(vel_paths[0], line, reducer=np.nanmax)
-            if vel_paths else 0.0
-            )
         # Sample at the center of the reference line
         cl_velocity = (
             self.sample_raster_point(line, self.selected_centerline_file, vel_paths[0])
@@ -279,11 +333,6 @@ class ExtractFlowApp(tk.Tk):
 
         # ——— Froude ———
         fr_paths  = glob(os.path.join(plan_folder, 'Froude (Max).vrt'))
-        # Sample Along the Line
-        max_froude = (
-            self._sample_along_line(fr_paths[0], line, reducer=np.nanmax)
-            if fr_paths else 0.0
-        )
         # Sample at the center of the reference line
         cl_froude = (
             self.sample_raster_point(line, self.selected_centerline_file, fr_paths[0])
@@ -291,11 +340,7 @@ class ExtractFlowApp(tk.Tk):
         )
 
         # ——— EGL ———
-        egl_paths  = glob(os.path.join(plan_folder, 'ege*.tif'))
-        # Sample Along the Line
-        # This only solves for the Velocity head. WSE would be added later on...
-        max_egl = (max_velocity ** 2) / (2 * 9.81) 
-        
+        egl_paths  = glob(os.path.join(plan_folder, 'ege*.tif'))        
         # Sample at the center of the reference line
         cl_egl = (
             self.sample_raster_point(line, self.selected_centerline_file, egl_paths[0])
@@ -309,7 +354,9 @@ class ExtractFlowApp(tk.Tk):
             if vel_paths else 0.0
         )
 
-        return min_terrain, max_velocity, max_froude, max_egl, cl_wse, cl_velocity, cl_froude, cl_egl
+        return cl_velocity, cl_froude, \
+                    cl_terrain, cl_lob, cl_rob, \
+                    cl_wse,   cl_egl
 
 
     def flow_extract(self, plan_file):
@@ -328,7 +375,7 @@ class ExtractFlowApp(tk.Tk):
 
                 # pull out plan metadata
                 info = f['/Plan Data/Plan Information']
-                plan_shortID = info.attrs['Plan ShortID'].decode('utf-8')
+                # plan_shortID = info.attrs['Plan ShortID'].decode('utf-8')
                 flow_id     = info.attrs['Flow Title'].decode('utf-8')
 
                 # reference line station names
@@ -342,24 +389,15 @@ class ExtractFlowApp(tk.Tk):
                 ])
                 max_discharge = np.max(ts, axis=0).tolist()
 
-                # max WSE per station
-                wse_ts = f[
-                  '/Results/Unsteady/Output/Output Blocks/'
-                  'DSS Hydrograph Output/Unsteady Time Series/Reference Lines/Water Surface'
-                ]
-                ave_wse = np.max(wse_ts, axis=0).tolist()
-
         except (KeyError, OSError) as e:
             logger.warning("Skipping %s: %s", os.path.basename(plan_file), e)
             return None
 
         # build and return DataFrame if everything succeeded
         return pd.DataFrame({
-            'Plan ShortID':   plan_shortID,
             'Station':        stations,
             'Flow Scenario':  flow_id,
             'Discharge':      max_discharge,
-            'AveWSE' :        ave_wse
         })
 
     def output_flow(self):
@@ -376,18 +414,18 @@ class ExtractFlowApp(tk.Tk):
             return
 
         # — Ask user where/how to save —
-        save_csv = filedialog.asksaveasfilename(
-            title="Save summary CSV as…",
+        save_xl = filedialog.asksaveasfilename(
+            title="Save summary Excel as…",
             initialdir=self.selected_folder,
-            defaultextension=".csv",
-            filetypes=[("CSV files","*.csv")]
+            defaultextension=".xlsx",
+            filetypes=[("Excel files","*.xlsx")]
         )
-        if not save_csv:
+        if not save_xl:
             # user cancelled
             self.progress_bar.pack_forget()
             self.compute_button.pack()
             return
-        save_html = os.path.splitext(save_csv)[0] + ".html"
+        save_html = os.path.splitext(save_xl)[0] + ".html"
 
         self.progress_bar['value'] = 5
         self.update_idletasks()
@@ -442,12 +480,12 @@ class ExtractFlowApp(tk.Tk):
         metrics = uniq.apply(
             lambda r: pd.Series(
                 self.get_values(r['Station'], r['Plan ShortID']),
-                index=['Thalweg', 'MaxVelocity', 'MaxFroude', 'MaxEGL',
-                       'CL-WSE','CL-Velocity','CL-Froude', 'CL-EGL', 
-                       ]
-            ),
+                index=['Flow Velocity','Froude Number',
+                       'CL-Terrain', 'CL-LOB', 'CL-ROB',
+                       'CL-WSE', 'CL-EGL' 
+                       ]),
             axis=1
-        )
+            )
         # metrics['MaxEGL'] = metrics['AveWSE'] + metrics['MaxEGL']
         metrics_df = pd.concat([uniq, metrics], axis=1)
         df_merged = df_all.merge(metrics_df,
@@ -463,9 +501,7 @@ class ExtractFlowApp(tk.Tk):
             inplace=True
         )
 
-        df_merged['MaxEGL'] = df_merged['MaxEGL'] + df_merged['AveWSE']
-        df_merged.to_csv(save_csv, index=False)
-        df_merged.to_html(save_html, index=False)
+        df_merged.to_excel(save_xl, index=False)
 
         # finish UI
         self.progress_bar['value'] = 100
@@ -483,13 +519,14 @@ class ExtractFlowApp(tk.Tk):
 
         messagebox.showinfo("Done!", summary)
 
-    def station_sort_key(self, station_str):
-        m = re.match(r'Station-(\d+)(?:\+(\d+))?', station_str)
+    def station_sort_key(station_str):
+        m = self._STATION_RE.match(station_str)
         if m:
-            base = int(m.group(1))
-            offset = int(m.group(2)) if m.group(2) else 0
+            base   = int(m.group(1))     # station number
+            offset = float(m.group(2))   # offset (decimal)
             return (base, offset)
-        return (float('inf'), 0)
+        # unmatched go last
+        return (float('inf'), 0.0)
 
     # ——— Exit ———
     def exit_app(self):
