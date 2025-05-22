@@ -38,7 +38,7 @@ def parse_subbasin_reach(filepath):
                 col = k.strip().lower().replace(" ", "_").replace("-", "_")
                 current[col] = v.strip()
     df = pd.DataFrame(records)
-    expected_cols = [  # same fixed order as your script
+    expected_cols = [  
         'type','name','area','downstream','discretization',
         
         # Simple Canopy Method
