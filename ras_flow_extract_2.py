@@ -374,7 +374,7 @@ class ExtractFlowApp(tk.Tk):
         # ——— Right Overbank (always expected) ———
         cl_rob = (
             self.sample_raster_point(line, 
-                                     self.selected_lob_file, 
+                                     self.selected_rob_file, 
                                      terrain_raster))
         
         # ——— Velocity ———
