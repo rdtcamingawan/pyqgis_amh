@@ -65,7 +65,7 @@ def parse_subbasin_reach(filepath):
         'transform','plane', 
         'plane_1_roughness', 'plane_1_number_of_steps',
         'plane_2_roughness', 'plane_2_number_of_steps',
-        'channel', 'subcollector_mannings_n', 'subc_steps',
+        'channel', 'subcollector_mannings_n', 'subcollector_steps',
         'channel', 'collector_mannings_n', 'collector_steps',
         'channel', 'channel_mannings_n', 'shape', 'channel_steps',
         
