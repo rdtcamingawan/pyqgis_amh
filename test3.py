@@ -93,7 +93,7 @@ PARAM_RANGES = {
     'gw_1_baseflow_fraction': (0.1, 1.0), 'gw_1_number_of_reservoirs': (1, 30),
     'gw_1_initial_baseflow': (0.0, 1), 'gw_2_baseflow_fraction': (0.1, 1.0),
     'gw_2_number_of_reservoirs': (1, 30), 'gw_2_initial_baseflow': (0.0, 1),
-    'gw_1_coefficient_baseflow' : (10,1000), 'gw_2_coefficient_baseflow': (10,1000)
+    'gw_1_coefficient_baseflow' : (10,1000), 'gw_2_coefficient_baseflow': (10,1000),
     # Kinematic Wave Transform
     'plane_1_roughness': (0.01, 0.25), 'plane_1_number_of_steps': (1, 30),
     'plane_2_roughness': (0.01, 0.25), 'plane_2_number_of_steps': (1, 30),
