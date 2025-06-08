@@ -66,7 +66,7 @@ BASIN_FILE_MAP = {
     'gw_2_baseflow_fraction': "Gw 2 Baseflow Fraction",
     'gw_2_number_of_reservoirs': "Gw 2 Number Reservoirs",
     'gw_2_initial_baseflow': "Gw 2 Initial Baseflow",
-    'gw_2_coefficient_baseflow' : 'GW-2 Routing Coefficient'
+    'gw_2_coefficient_baseflow' : 'GW-2 Routing Coefficient',
     # Kinematic Wave Transform
     'plane_1_roughness': "Plane 1 Roughness",
     'plane_1_number_of_steps': "Plane 1 Number Of Steps",
@@ -525,8 +525,8 @@ target_run_name_var = StringVar(value="edc_run_v2")
 obs_xl_var = StringVar(value="C:/Users/richmond/Downloads/hms_edc_amacan_autotest_CALIBRATION/NSE_computation/observed_data.xlsx")
 target_subbasin_var = StringVar(value="Simsimin Catchment")
 # New GUI variables
-max_iter_var = StringVar(value="20")
-target_nse_var = StringVar(value="0.65")
+max_iter_var = StringVar(value="10000")
+target_nse_var = StringVar(value="0.51")
 
 add_input_row("HEC-HMS Install Directory:", hms_dir_var, is_dir=True)
 add_input_row("HMS Project Directory:", project_dir_var, is_dir=True)
@@ -540,8 +540,6 @@ add_input_row("Target Subbasin:", target_subbasin_var)
 add_input_row("Max Iterations:", max_iter_var)
 add_input_row("Target NSE:", target_nse_var)
 
-run_button = ttk.Button(input_frame, text="Start Intelligent Calibration", command=start_thread)
+run_button = ttk.Button(input_frame, text="Start Calibration", command=start_thread)
 run_button.pack(pady=10, fill='x', ipady=5)
-print("Welcome to the Amacan HMS Auto-Calibrator v28!")
-print("Your default paths have been loaded. GUI controls for iterations and NSE are active.")
 root.mainloop()
