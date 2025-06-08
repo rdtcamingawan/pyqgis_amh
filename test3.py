@@ -62,9 +62,11 @@ BASIN_FILE_MAP = {
     'gw_1_baseflow_fraction': "Gw 1 Baseflow Fraction",
     'gw_1_number_of_reservoirs': "Gw 1 Number Reservoirs",
     'gw_1_initial_baseflow': "Gw 1 Initial Baseflow",
+    'gw_1_coefficient_baseflow' : 'GW-1 Routing Coefficient',
     'gw_2_baseflow_fraction': "Gw 2 Baseflow Fraction",
     'gw_2_number_of_reservoirs': "Gw 2 Number Reservoirs",
     'gw_2_initial_baseflow': "Gw 2 Initial Baseflow",
+    'gw_2_coefficient_baseflow' : 'GW-2 Routing Coefficient'
     # Kinematic Wave Transform
     'plane_1_roughness': "Plane 1 Roughness",
     'plane_1_number_of_steps': "Plane 1 Number Of Steps",
@@ -91,6 +93,7 @@ PARAM_RANGES = {
     'gw_1_baseflow_fraction': (0.1, 1.0), 'gw_1_number_of_reservoirs': (1, 30),
     'gw_1_initial_baseflow': (0.0, 1), 'gw_2_baseflow_fraction': (0.1, 1.0),
     'gw_2_number_of_reservoirs': (1, 30), 'gw_2_initial_baseflow': (0.0, 1),
+    'gw_1_coefficient_baseflow' : (10,1000), 'gw_2_coefficient_baseflow': (10,1000)
     # Kinematic Wave Transform
     'plane_1_roughness': (0.01, 0.25), 'plane_1_number_of_steps': (1, 30),
     'plane_2_roughness': (0.01, 0.25), 'plane_2_number_of_steps': (1, 30),
@@ -265,7 +268,7 @@ def run_hms_model(hms_cmd_path, jython_script_path):
         print(f"An unexpected Python error occurred during HMS execution: {e}")
     return False
 
-def compute_nse(dss_filepath, dss_run_name, obs_df, target_subbasin):
+def compute_nse(dss_filepath, dss_run_name, obs_df, target_subbasin, iteration_num): # Added iteration_num
     """
     Computes NSE for the specified target_subbasin using logic from the user's proven script.
     """
@@ -329,7 +332,8 @@ def compute_nse(dss_filepath, dss_run_name, obs_df, target_subbasin):
                 return np.nan, df_merged
 
             nse = 1 - (numerator / denominator)
-            print(f"SUCCESS! Calculated NSE for {ep_name}: {nse:.4f}")
+            # **MODIFIED PRINT STATEMENT**
+            print(f"Run {iteration_num} | NSE for {ep_name}: {nse:.4f}")
             return nse, df_merged
 
     except Exception as e:
@@ -456,7 +460,8 @@ def run_calibration_workflow():
             print(f"Run {iteration} failed – logging parameters and continuing.")
             display_failed_run_tab(current_params); continue
         
-        current_nse, df_merged = compute_nse(dss_path, dss_name, df_obs, target_subbasin)
+        # **UPDATED FUNCTION CALL**
+        current_nse, df_merged = compute_nse(dss_path, dss_name, df_obs, target_subbasin, iteration)
         
         log_parameters({'run_id': f"Run_{iteration}", 'nse': current_nse, **current_params.copy()}, csv_path)
         
@@ -467,7 +472,7 @@ def run_calibration_workflow():
             print(f"NEW BEST FOUND! Iteration: {iteration}, NSE: {current_nse:.4f} (previously {best_nse:.4f})")
             best_nse = current_nse
             best_params = current_params
-            best_df_merged = df_merged.copy() # Save the merged data for the best run
+            best_df_merged = df_merged.copy() 
 
     # --- Post-Calibration Summary and Cleanup ---
     if best_nse >= target_nse:
