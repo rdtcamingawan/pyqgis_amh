@@ -61,10 +61,14 @@ BASIN_FILE_MAP = {
     # Linear Reservoir Baseflow
     'gw_1_baseflow_fraction': "Gw 1 Baseflow Fraction",
     'gw_1_number_of_reservoirs': "Gw 1 Number Reservoirs",
+    'gw_1_routing_coefficient' : 'GW-1 Routing Coefficient',
     'gw_1_initial_baseflow': "Gw 1 Initial Baseflow",
+
     'gw_2_baseflow_fraction': "Gw 2 Baseflow Fraction",
     'gw_2_number_of_reservoirs': "Gw 2 Number Reservoirs",
+    'gw_2_routing_coefficient' : 'GW-2 Routing Coefficient',
     'gw_2_initial_baseflow': "Gw 2 Initial Baseflow",
+    
     # Kinematic Wave Transform
     'plane_1_roughness': "Plane 1 Roughness",
     'plane_1_number_of_steps': "Plane 1 Number Of Steps",
@@ -87,10 +91,13 @@ PARAM_RANGES = {
     'groundwater_1_maximum_percolation': (1.0, 50.0), 'initial_gw2_storage_percent': (0.0, 100.0),
     'groundwater_2_storage_capacity': (1.0, 1500.0), 'groundwater_2_routing_coefficient': (50.0, 1000.0),
     'groundwater_2_maximum_percolation': (1.0, 100.0),
+
     # Linear Reservoir Baseflow
     'gw_1_baseflow_fraction': (0.1, 1.0), 'gw_1_number_of_reservoirs': (1, 30),
     'gw_1_initial_baseflow': (0.0, 1), 'gw_2_baseflow_fraction': (0.1, 1.0),
     'gw_2_number_of_reservoirs': (1, 30), 'gw_2_initial_baseflow': (0.0, 1),
+    'gw_1_routing_coefficient' : (1.0, 1500.0), 'gw_2_routing_coefficient' : (1.0, 1500.0),
+
     # Kinematic Wave Transform
     'plane_1_roughness': (0.01, 0.25), 'plane_1_number_of_steps': (1, 30),
     'plane_2_roughness': (0.01, 0.25), 'plane_2_number_of_steps': (1, 30),
