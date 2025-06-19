@@ -386,7 +386,7 @@ class ExtractFlowApp(tk.Tk):
         )
 
         # ——— Froude ———
-        fr_paths  = glob(os.path.join(plan_folder, f'Froude {plan_sim_time}.vrt'))
+        fr_paths  = glob(os.path.join(plan_folder, f'Froude ({plan_sim_time}).vrt'))
         # Sample at the center of the reference line
         cl_froude = (
             self.sample_raster_point(line, self.selected_centerline_file, fr_paths[0])
