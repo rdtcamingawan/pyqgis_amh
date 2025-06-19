@@ -340,7 +340,7 @@ class ExtractFlowApp(tk.Tk):
             return default
         
     # ——— Flow Extraction ———
-    def get_values(self, station, plan_shortID):
+    def get_values(self, station, plan_shortID, plan_sim_time):
         """
         Returns (min_terrain, max_velocity, max_froude) along the reference line.
         If the corresponding VRTs are missing, velocity or froude will be 0.
@@ -386,7 +386,7 @@ class ExtractFlowApp(tk.Tk):
         )
 
         # ——— Froude ———
-        fr_paths  = glob(os.path.join(plan_folder, 'Froude (Max).vrt'))
+        fr_paths  = glob(os.path.join(plan_folder, f'Froude {plan_sim_time}.vrt'))
         # Sample at the center of the reference line
         cl_froude = (
             self.sample_raster_point(line, self.selected_centerline_file, fr_paths[0])
@@ -431,6 +431,7 @@ class ExtractFlowApp(tk.Tk):
                 info = f['/Plan Data/Plan Information']
                 plan_shortID = info.attrs['Plan ShortID'].decode('utf-8')
                 flow_id     = info.attrs['Flow Title'].decode('utf-8')
+                sim_end_time = info.attrs['Simulation End Time'].decode('utf-8')
 
                 # reference line station names
                 attrs = np.array(f[ref_attr_path])
@@ -450,6 +451,7 @@ class ExtractFlowApp(tk.Tk):
         # build and return DataFrame if everything succeeded
         return pd.DataFrame({
             'Plan ShortID' : plan_shortID,
+            'Sim End Time' : sim_end_time,
             'Station':        stations,
             'Flow Scenario':  flow_id,
             'Discharge':      max_discharge,
@@ -534,7 +536,7 @@ class ExtractFlowApp(tk.Tk):
         
         metrics = uniq.apply(
             lambda r: pd.Series(
-                self.get_values(r['Station'], r['Plan ShortID']),
+                self.get_values(r['Station'], r['Plan ShortID'], r['Sim End Time']),
                 index=['Flow Velocity','Froude Number',
                        'CL-Terrain', 'CL-LOB', 'CL-ROB',
                        'CL-WSE', 'CL-EGL' 
