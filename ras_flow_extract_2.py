@@ -530,7 +530,7 @@ class ExtractFlowApp(tk.Tk):
 
         # — concat & compute as before —
         df_all = pd.concat(dfs, ignore_index=True)
-        uniq = (df_all[['Plan ShortID','Station']]
+        uniq = (df_all[['Plan ShortID','Station', 'Sim End Time']]
                 .drop_duplicates()
                 .reset_index(drop=True))
         
