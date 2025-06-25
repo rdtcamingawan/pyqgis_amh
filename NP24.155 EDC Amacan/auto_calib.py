@@ -312,7 +312,7 @@ def compute_nse(dss_filepath, dss_run_name, obs_df, target_subbasin, iteration_n
 
             allowed_dates = pd.to_datetime([
                 "03/02/2025","07/02/2025","10/02/2025","12/02/2025","14/02/2025",
-                "17/02/2025","19/02/2025","03/03/2025","05/03/2025","07/03/2025",
+                "19/02/2025","03/03/2025","05/03/2025","07/03/2025",
                 "12/03/2025","17/03/2025","24/03/2025","26/03/2025","28/03/2025",
                 "31/03/2025","02/04/2025","07/04/2025"], dayfirst=True)
 
@@ -559,6 +559,6 @@ add_input_row("Target Subbasin:", target_subbasin_var)
 add_input_row("Max Iterations:", max_iter_var)
 add_input_row("Target NSE:", target_nse_var)
 
-run_button = ttk.Button(input_frame, text="Start Intelligent Calibration", command=start_thread)
+run_button = ttk.Button(input_frame, text="Start Calibration", command=start_thread)
 run_button.pack(pady=10, fill='x', ipady=5)
 root.mainloop()
